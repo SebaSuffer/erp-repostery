@@ -1,5 +1,8 @@
 import streamlit as st
-from supabase import create_client  # Todo en minúsculas
+try:
+    from supabase import create_client, Client
+except ImportError:
+    from supabase import create_client
 import pandas as pd
 import time
 import json 
