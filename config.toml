@@ -1,0 +1,7 @@
+[theme]
+base = "light"
+primaryColor = "#f2590d"        # El naranja "quemado" del diseño
+backgroundColor = "#f8f6f5"     # El color crema de fondo (background-light)
+secondaryBackgroundColor = "#ffffff" # Blanco puro para el sidebar y tarjetas
+textColor = "#1c120d"           # Café muy oscuro para el texto
+font = "sans serif"
