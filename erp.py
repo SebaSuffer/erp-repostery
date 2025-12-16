@@ -17,6 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+
 # --- ESTILOS CSS ---
 st.markdown("""
 <style>
@@ -65,7 +66,11 @@ def init_connection():
         url = st.secrets["supabase"]["url"]
         key = st.secrets["supabase"]["key"]
         return create_client(url, key)
-    except:
+    except Exception as e:
+        # Aquí mostramos el error detallado si la conexión falla
+        st.error(f"¡ERROR FATAL DE CONEXIÓN! Detalle: {e}") 
+        # Esta línea puede ser útil si el error es 'KeyError' por falta de secrets:
+        # st.error(f"DEBUG: st.secrets keys: {list(st.secrets.keys())}") 
         return None
 
 supabase = init_connection()
