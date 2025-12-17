@@ -484,21 +484,18 @@ def main_app():
                         st.divider()
 
     # ==========================================
-    # 🧁 PRODUCTOS Y VARIACIONES (V9: EDICIÓN TOTAL + FOTOS BASE)
+    # 🧁 PRODUCTOS Y VARIACIONES (V10: COSTING AVANZADO 💰)
     # ==========================================
     elif menu == "🧁 Mis Productos":
         st.title("🧁 Catálogo Maestro")
-        st.markdown("Gestiona tus masas base y crea sus variaciones con medidas de cocina incluidas.")
+        st.markdown("Gestiona tus masas base y crea sus variaciones con calculadora de costos avanzada.")
 
         # --- HELPER: Conversión para Recetas ---
         def convertir_a_base(cantidad, unidad_receta, unidad_inventario):
             if unidad_receta == unidad_inventario: return cantidad
-            
-            # Estandarizamos medidas de cocina (Promedios repostería)
             factor_cdta = 5   # 1 cdta = 5 gr/ml
             factor_cda = 15   # 1 cda  = 15 gr/ml
 
-            # Conversiones de Peso (Si inventario está en KG o GR)
             if unidad_inventario == 'kg':
                 if unidad_receta == 'gr': return cantidad / 1000
                 if unidad_receta == 'cdta': return (cantidad * factor_cdta) / 1000 
@@ -509,7 +506,6 @@ def main_app():
                 if unidad_receta == 'cdta': return cantidad * factor_cdta
                 if unidad_receta == 'cda': return cantidad * factor_cda
             
-            # Conversiones de Volumen (Si inventario está en LT o ML)
             if unidad_inventario == 'lt':
                 if unidad_receta in ['ml', 'cc']: return cantidad / 1000
                 if unidad_receta == 'cdta': return (cantidad * factor_cdta) / 1000
@@ -520,6 +516,40 @@ def main_app():
                 if unidad_receta == 'cdta': return cantidad * factor_cdta
                 if unidad_receta == 'cda': return cantidad * factor_cda
             return 0 
+
+        # --- HELPER: CALCULADORA DE PRECIO CASCADA ---
+        def calcular_precio_final(costo_insumos, p_merma, p_ops, costo_mo, p_maq, p_margen, costo_empaque):
+            # 1. Merma
+            val_merma = costo_insumos * (p_merma / 100)
+            sub1 = costo_insumos + val_merma
+            
+            # 2. Gasto Operacional (sobre sub1)
+            val_ops = sub1 * (p_ops / 100)
+            sub2 = sub1 + val_ops
+            
+            # 3. Mano de Obra
+            sub3 = sub2 + costo_mo
+            
+            # 4. Mantención Maquinaria (sobre sub3)
+            val_maq = sub3 * (p_maq / 100)
+            sub4 = sub3 + val_maq
+            
+            # 5. Margen de Ganancia (sobre sub4)
+            val_ganancia = sub4 * (p_margen / 100)
+            sub5 = sub4 + val_ganancia
+            
+            # 6. Empaque
+            final = sub5 + costo_empaque
+            
+            return final, {
+                "insumos": costo_insumos,
+                "merma": val_merma,
+                "ops": val_ops,
+                "mo": costo_mo,
+                "maq": val_maq,
+                "ganancia": val_ganancia,
+                "empaque": costo_empaque
+            }
 
         # Cargar Datos
         mapa_insumos = {}
@@ -540,24 +570,23 @@ def main_app():
         tab_catalogo, tab_base, tab_variacion, tab_editor = st.tabs(["📖 Ver Catálogo", "✨ 1. Crear Masa Base", "🍰 2. Crear Variación", "✏️ Editor de Recetas"])
         
         # ---------------------------------------------------------
-        # TAB 4: EDITOR DE RECETAS (VARIACIONES)
+        # TAB 4: EDITOR DE RECETAS (CON COSTING AVANZADO)
         # ---------------------------------------------------------
         with tab_editor:
-            st.subheader("✏️ Editor de Recetas (Hijos)")
+            st.subheader("✏️ Editor de Recetas")
             
-            if 'edit_var_id' not in st.session_state:
-                st.session_state.edit_var_id = None
+            if 'edit_var_id' not in st.session_state: st.session_state.edit_var_id = None
                 
             if st.session_state.edit_var_id is None:
-                st.info("👈 Ve a la pestaña 'Ver Catálogo' y presiona el botón '✏️ Editar Receta' en alguna variación.")
+                st.info("👈 Ve a la pestaña 'Ver Catálogo' y presiona el botón '✏️ Editar Receta'.")
             else:
                 var_data = st.session_state.edit_var_data
-                st.markdown(f"Editando Variación: **{var_data['nombre']}**")
+                st.markdown(f"Editando: **{var_data['nombre']}**")
                 
-                col_e1, col_e2 = st.columns([1, 1])
+                col_e1, col_e2 = st.columns([1, 1.2]) # Columna derecha más ancha para los costos
                 
                 with col_e1:
-                    st.markdown("##### 🥣 Modificar Ingredientes")
+                    st.markdown("##### 🥣 Ingredientes")
                     insumo_k = st.selectbox("Agregar Insumo", list(mapa_insumos.keys()), index=None, key="edit_sel_ins")
                     if insumo_k:
                         d_ins = mapa_insumos[insumo_k]
@@ -573,7 +602,7 @@ def main_app():
                         
                         v_uni = cc2.selectbox("Unidad", opts, key="edit_uni")
                         
-                        if st.button("➕ Añadir a la Mezcla", key="edit_add_btn"):
+                        if st.button("➕ Añadir", key="edit_add_btn"):
                             if v_cant > 0:
                                 cant_norm = convertir_a_base(v_cant, v_uni, u_base)
                                 costo_linea = cant_norm * d_ins['costo_unitario']
@@ -582,11 +611,10 @@ def main_app():
                                     "costo": costo_linea, "insumo_id": d_ins['id']
                                 })
                                 st.rerun()
-
-                with col_e2:
-                    st.markdown("##### 📋 Lista Actual")
-                    total_receta_edit = 0
                     
+                    st.divider()
+                    st.caption("Lista de Ingredientes:")
+                    total_receta_edit = 0
                     for idx, ing in enumerate(st.session_state.edit_ingredientes):
                         costo_actual = ing['costo']
                         if ing['nombre'] in mapa_insumos:
@@ -602,15 +630,50 @@ def main_app():
                         if c_btn.button("🗑️", key=f"del_edit_{idx}"):
                             st.session_state.edit_ingredientes.pop(idx)
                             st.rerun()
+
+                with col_e2:
+                    st.markdown("##### 💰 Estructura de Costos")
+                    st.info(f"Costo Ingredientes Base: **${total_receta_edit:,.0f}**")
                     
-                    st.divider()
-                    st.markdown(f"#### Costo Producción: ${total_receta_edit:,.0f}")
+                    with st.expander("⚙️ Configuración Avanzada de Costos", expanded=True):
+                        st.caption("Ajusta los parámetros para calcular el precio real.")
+                        
+                        # PARÁMETROS CONFIGURABLES
+                        ep1, ep2 = st.columns(2)
+                        p_merma = ep1.slider("Merma (%)", 0, 15, 5, key="ed_merma")
+                        p_ops = ep2.slider("Gastos Ops (%)", 0, 30, 15, key="ed_ops")
+                        
+                        ep3, ep4 = st.columns(2)
+                        costo_mo = ep3.number_input("Mano de Obra ($)", value=6400, step=1000, help="2 horas aprox", key="ed_mo")
+                        p_maq = ep4.slider("Mantención Maq. (%)", 0, 20, 5, key="ed_maq")
+                        
+                        st.divider()
+                        p_margen = st.slider("Margen Ganancia (%)", 10, 100, 60, key="ed_margen")
+                        costo_empaque = st.number_input("Costo Empaque ($)", value=3000, step=500, key="ed_empaque")
+
+                    # CÁLCULO EN TIEMPO REAL
+                    precio_sug_edit, breakdown = calcular_precio_final(
+                        total_receta_edit, p_merma, p_ops, costo_mo, p_maq, p_margen, costo_empaque
+                    )
                     
-                    margen_edit = st.slider("Nuevo Margen %", 10, 200, 50, key="edit_margen")
-                    sugerido = total_receta_edit / (1 - (margen_edit/100)) if margen_edit < 100 else total_receta_edit * (1 + margen_edit/100)
-                    st.caption(f"Sugerido: ${sugerido:,.0f}")
+                    # VISUALIZACIÓN DEL DESGLOSE
+                    st.markdown("---")
+                    st.markdown(f"""
+                    <div style="font-size: 14px;">
+                        Creating <b>Subtotal 1</b> (Insumos + Merma): ${breakdown['insumos'] + breakdown['merma']:,.0f}<br>
+                        + Gastos Ops ({p_ops}%): ${breakdown['ops']:,.0f}<br>
+                        + Mano de Obra: ${breakdown['mo']:,.0f}<br>
+                        + Maquinaria ({p_maq}%): ${breakdown['maq']:,.0f}<br>
+                        --------------------------------<br>
+                        <b>Costo Total Producción: ${(precio_sug_edit - breakdown['ganancia'] - breakdown['empaque']):,.0f}</b><br>
+                        + Ganancia ({p_margen}%): <span style="color:green; font-weight:bold">${breakdown['ganancia']:,.0f}</span><br>
+                        + Empaque: ${breakdown['empaque']:,.0f}
+                    </div>
+                    """, unsafe_allow_html=True)
                     
-                    precio_final_edit = st.number_input("Precio Venta Final", value=int(var_data['precio']), step=500, key="edit_precio")
+                    st.markdown(f"#### Precio Sugerido: ${precio_sug_edit:,.0f}")
+                    
+                    precio_final_edit = st.number_input("Precio Venta Final ($)", value=int(precio_sug_edit), step=500, key="edit_precio_f")
                     
                     if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
                         try:
@@ -618,15 +681,14 @@ def main_app():
                                 "precio": precio_final_edit,
                                 "ingredientes_json": json.dumps(st.session_state.edit_ingredientes)
                             }).eq('id', st.session_state.edit_var_id).execute()
-                            
-                            st.success("¡Receta actualizada!")
+                            st.success("¡Actualizado correctamente!")
                             st.session_state.edit_var_id = None
                             time.sleep(1.5)
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error al actualizar: {e}")
+                            st.error(f"Error: {e}")
                     
-                    if st.button("Cancelar Edición"):
+                    if st.button("Cancelar"):
                         st.session_state.edit_var_id = None
                         st.rerun()
 
@@ -657,7 +719,7 @@ def main_app():
                         st.error(f"Error: {e}")
 
         # ---------------------------------------------------------
-        # TAB 3: CREAR VARIACIÓN
+        # TAB 3: CREAR VARIACIÓN (NUEVA CON CÁLCULO)
         # ---------------------------------------------------------
         with tab_variacion:
             st.subheader("Paso 2: Receta Específica")
@@ -671,34 +733,36 @@ def main_app():
                     id_padre = mapa_productos_base[sel_padre]['id']
                     st.divider()
                     
-                    # DATOS
                     col_sabor, col_tam = st.columns([2, 1])
                     with col_sabor: var_sabor = st.text_input("2. Sabor / Variedad", placeholder="Ej: Manjar Nuez")
                     with col_tam:
-                        opciones_tamano = ["12 Personas", "15 Personas", "20 Personas", "30 Personas", "40 Personas", "60 Personas", "Bandeja 12 Unid", "Individual"]
+                        opciones_tamano = ["12 Personas", "15 Personas", "18 Personas", "20 Personas", "30 Personas", "40 Personas", "45 Personas", "60 Personas", "Bandeja 12 Unid", "Individual"]
                         var_tamano = st.selectbox("3. Tamaño", opciones_tamano)
+                        
+                        # Rendimiento Automático
                         val_rendimiento = 1
                         if "Bandeja 12" in var_tamano: val_rendimiento = 12
                         elif "Individual" in var_tamano: val_rendimiento = 1
-                        rendimiento_final = st.number_input("Rendimiento", value=val_rendimiento, min_value=1)
+                        rendimiento_final = st.number_input("Rendimiento (Unidades que salen)", value=val_rendimiento, min_value=1, help="Si es torta pon 1. Si son cupcakes pon 12.")
 
                     nombre_completo = f"{var_sabor} - {var_tamano}" if var_sabor else var_tamano
                     st.info(f"📝 Creando: **{nombre_completo}**")
 
-                    st.markdown("##### 🥣 Ingredientes")
+                    col_izq, col_der = st.columns([1, 1.2]) # Layout 2 columnas
                     
-                    if 'var_ingredientes' not in st.session_state: st.session_state.var_ingredientes = []
-                    
-                    c_input, c_list = st.columns([1, 1])
-                    with c_input:
-                        insumo_k = st.selectbox("Buscar Insumo", list(mapa_insumos.keys()), index=None, placeholder="Escribe ingrediente...")
+                    # --- IZQUIERDA: INGREDIENTES ---
+                    with col_izq:
+                        st.markdown("##### 🥣 Ingredientes")
+                        if 'var_ingredientes' not in st.session_state: st.session_state.var_ingredientes = []
+                        
+                        insumo_k = st.selectbox("Insumo", list(mapa_insumos.keys()), index=None, placeholder="Buscar...")
                         if insumo_k:
                             d_ins = mapa_insumos[insumo_k]
                             u_base = d_ins['unidad_medida']
                             st.caption(f"Costo: ${d_ins['costo_unitario']:,.0f} / {u_base}")
                             
                             cc1, cc2 = st.columns(2)
-                            v_cant = cc1.number_input("Cantidad", 0.0, format="%.2f")
+                            v_cant = cc1.number_input("Cant.", 0.0, format="%.2f")
                             
                             opts = [u_base]
                             if u_base == 'kg': opts = ['gr', 'kg', 'cdta', 'cda']
@@ -706,33 +770,57 @@ def main_app():
                             elif u_base == 'lt': opts = ['ml', 'lt', 'cc', 'cdta', 'cda']
                             elif u_base in ['ml', 'cc']: opts = ['ml', 'lt', 'cc', 'cdta', 'cda']
                             
-                            v_uni = cc2.selectbox("Unidad Receta", opts)
+                            v_uni = cc2.selectbox("Unidad", opts)
                             
                             if st.button("⬇️ Agregar"):
                                 if v_cant > 0:
                                     cant_norm = convertir_a_base(v_cant, v_uni, u_base)
-                                    if cant_norm > 0:
-                                        costo_linea = cant_norm * d_ins['costo_unitario']
-                                        st.session_state.var_ingredientes.append({
-                                            "nombre": insumo_k, "cantidad": v_cant, "unidad": v_uni, 
-                                            "costo": costo_linea, "insumo_id": d_ins['id']
-                                        })
-                                        st.rerun()
-
-                    with c_list:
-                        total_receta = sum([x['costo'] for x in st.session_state.var_ingredientes])
-                        st.markdown(f"**Costo Ingredientes:** ${total_receta:,.0f}")
+                                    costo_linea = cant_norm * d_ins['costo_unitario']
+                                    st.session_state.var_ingredientes.append({
+                                        "nombre": insumo_k, "cantidad": v_cant, "unidad": v_uni, 
+                                        "costo": costo_linea, "insumo_id": d_ins['id']
+                                    })
+                                    st.rerun()
                         
+                        st.markdown("---")
+                        total_receta = sum([x['costo'] for x in st.session_state.var_ingredientes])
                         for i, item in enumerate(st.session_state.var_ingredientes):
                             st.markdown(f"**• {item['cantidad']} {item['unidad']} {item['nombre']}** (${item['costo']:,.0f})")
                             if st.button("🗑️", key=f"del_{i}"):
                                 st.session_state.var_ingredientes.pop(i)
                                 st.rerun()
+
+                    # --- DERECHA: CALCULADORA COSTOS ---
+                    with col_der:
+                        st.markdown("##### 💰 Calculadora de Precios")
+                        st.info(f"Costo Ingredientes: **${total_receta:,.0f}**")
                         
-                        st.divider()
-                        margen = st.slider("Margen %", 10, 200, 50)
-                        precio_sug = total_receta / (1 - (margen/100)) if margen < 100 else total_receta * (1 + margen/100)
-                        st.caption(f"Sugerido: ${precio_sug:,.0f}")
+                        with st.expander("⚙️ Opciones Avanzadas", expanded=True):
+                            c_p1, c_p2 = st.columns(2)
+                            p_merma = c_p1.slider("Merma %", 0, 15, 5)
+                            p_ops = c_p2.slider("G. Ops %", 0, 30, 15)
+                            
+                            c_p3, c_p4 = st.columns(2)
+                            costo_mo = c_p3.number_input("Mano Obra $", value=6400, step=500)
+                            p_maq = c_p4.slider("Maquinaria %", 0, 20, 5)
+                            
+                            p_margen = st.slider("Margen Ganancia %", 10, 100, 60)
+                            costo_empaque = st.number_input("Empaque $", value=3000, step=500)
+
+                        # Calcular
+                        precio_sug, bd = calcular_precio_final(total_receta, p_merma, p_ops, costo_mo, p_maq, p_margen, costo_empaque)
+                        
+                        st.markdown(f"""
+                        <div style="background:#f8f9fa; padding:10px; border-radius:5px; font-size:13px;">
+                            <b>Desglose del Costo:</b><br>
+                            Subtotal 1 (Con Merma): ${bd['insumos']+bd['merma']:,.0f}<br>
+                            + Ops: ${bd['ops']:,.0f} | + MO: ${bd['mo']:,.0f} | + Maq: ${bd['maq']:,.0f}<br>
+                            <b>Costo Prod. Total: ${(precio_sug - bd['ganancia'] - bd['empaque']):,.0f}</b><br>
+                            <span style="color:green">+ Ganancia: ${bd['ganancia']:,.0f}</span> | + Empaque: ${bd['empaque']:,.0f}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        st.markdown(f"#### Sugerido: ${precio_sug:,.0f}")
                         
                         precio_final = st.number_input("Precio Venta Final ($)", value=int(precio_sug), step=500)
                         
@@ -752,7 +840,7 @@ def main_app():
                                     st.error(f"Error: {e}")
 
         # ---------------------------------------------------------
-        # TAB 1: CATÁLOGO (IMAGEN MÁS GRANDE 📸)
+        # TAB 1: CATÁLOGO
         # ---------------------------------------------------------
         with tab_catalogo:
             st.subheader("Catálogo")
@@ -764,21 +852,16 @@ def main_app():
                     variaciones_p = [v for v in all_vars if v['producto_id'] == p_data['id']]
                     
                     with st.expander(f"🎂 {p_nombre} ({len(variaciones_p)} var)"):
-                        
-                        # CAMBIO: Aumenté la primera columna de 1 a 2 para darle más espacio a la foto
                         col_img, col_info, col_actions = st.columns([2, 3, 1])
                         
                         with col_img:
-                            # Mostrar Imagen si existe
                             if p_data.get('imagen_url'):
-                                # CAMBIO: width=300 (3x más grande que antes)
                                 st.image(p_data['imagen_url'], width=300)
                             else:
                                 st.markdown("🖼️")
                         
                         with col_info:
                             st.caption(f"Categoría: **{p_data.get('categoria', 'General')}**")
-                            # Listado de variaciones
                             if not variaciones_p:
                                 st.info("Sin variedades.")
                             else:
@@ -787,7 +870,6 @@ def main_app():
                                         c_v1, c_v2 = st.columns([3, 1])
                                         c_v1.markdown(f"**{v['nombre']}** - ${v['precio']:,.0f}")
                                         
-                                        # Botones de Acción Variación
                                         with c_v2:
                                             if st.button("✏️", key=f"edit_{v['id']}", help="Editar Receta"):
                                                 st.session_state.edit_var_id = v['id']
@@ -809,25 +891,18 @@ def main_app():
                                     st.divider()
 
                         with col_actions:
-                            # POPOVER PARA EDITAR LA BASE (NOMBRE/FOTO)
                             with st.popover("⚙️ Config Base"):
-                                st.markdown("##### Editar Producto Base")
                                 new_name_b = st.text_input("Nombre", p_data['nombre'], key=f"n_{p_data['id']}")
                                 new_cat_b = st.selectbox("Categoría", ["Tortas", "Cóctel", "Individuales", "Bollería"], index=0, key=f"c_{p_data['id']}")
                                 new_img_b = st.text_input("URL Imagen", p_data.get('imagen_url', ''), key=f"i_{p_data['id']}")
                                 
-                                if st.button("Guardar Cambios Base", key=f"save_b_{p_data['id']}"):
+                                if st.button("Guardar", key=f"save_b_{p_data['id']}"):
                                     supabase.table('productos').update({
-                                        "nombre": new_name_b,
-                                        "categoria": new_cat_b,
-                                        "imagen_url": new_img_b
+                                        "nombre": new_name_b, "categoria": new_cat_b, "imagen_url": new_img_b
                                     }).eq('id', p_data['id']).execute()
-                                    st.success("Actualizado")
-                                    time.sleep(1)
                                     st.rerun()
 
-                            # Botón Borrar Base (Existente)
-                            if st.button("🗑️ Borrar Todo", key=f"del_b_{p_data['id']}", help="Borra la base y todas sus variaciones"):
+                            if st.button("🗑️ Borrar Todo", key=f"del_b_{p_data['id']}"):
                                 supabase.table('productos').delete().eq('id', p_data['id']).execute()
                                 st.rerun()
             else:
