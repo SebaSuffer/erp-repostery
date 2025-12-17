@@ -484,7 +484,7 @@ def main_app():
                         st.divider()
 
     # ==========================================
-    # 🧁 PRODUCTOS Y VARIACIONES (V10: COSTING AVANZADO 💰)
+    # 🧁 PRODUCTOS Y VARIACIONES (V11: EDITOR DE RENDIMIENTO Y COSTOS)
     # ==========================================
     elif menu == "🧁 Mis Productos":
         st.title("🧁 Catálogo Maestro")
@@ -519,37 +519,17 @@ def main_app():
 
         # --- HELPER: CALCULADORA DE PRECIO CASCADA ---
         def calcular_precio_final(costo_insumos, p_merma, p_ops, costo_mo, p_maq, p_margen, costo_empaque):
-            # 1. Merma
             val_merma = costo_insumos * (p_merma / 100)
             sub1 = costo_insumos + val_merma
-            
-            # 2. Gasto Operacional (sobre sub1)
             val_ops = sub1 * (p_ops / 100)
             sub2 = sub1 + val_ops
-            
-            # 3. Mano de Obra
             sub3 = sub2 + costo_mo
-            
-            # 4. Mantención Maquinaria (sobre sub3)
             val_maq = sub3 * (p_maq / 100)
             sub4 = sub3 + val_maq
-            
-            # 5. Margen de Ganancia (sobre sub4)
             val_ganancia = sub4 * (p_margen / 100)
             sub5 = sub4 + val_ganancia
-            
-            # 6. Empaque
             final = sub5 + costo_empaque
-            
-            return final, {
-                "insumos": costo_insumos,
-                "merma": val_merma,
-                "ops": val_ops,
-                "mo": costo_mo,
-                "maq": val_maq,
-                "ganancia": val_ganancia,
-                "empaque": costo_empaque
-            }
+            return final, {"insumos": costo_insumos, "merma": val_merma, "ops": val_ops, "mo": costo_mo, "maq": val_maq, "ganancia": val_ganancia, "empaque": costo_empaque}
 
         # Cargar Datos
         mapa_insumos = {}
@@ -570,7 +550,7 @@ def main_app():
         tab_catalogo, tab_base, tab_variacion, tab_editor = st.tabs(["📖 Ver Catálogo", "✨ 1. Crear Masa Base", "🍰 2. Crear Variación", "✏️ Editor de Recetas"])
         
         # ---------------------------------------------------------
-        # TAB 4: EDITOR DE RECETAS (CON COSTING AVANZADO)
+        # TAB 4: EDITOR DE RECETAS (CORREGIDO CON RENDIMIENTO)
         # ---------------------------------------------------------
         with tab_editor:
             st.subheader("✏️ Editor de Recetas")
@@ -583,7 +563,7 @@ def main_app():
                 var_data = st.session_state.edit_var_data
                 st.markdown(f"Editando: **{var_data['nombre']}**")
                 
-                col_e1, col_e2 = st.columns([1, 1.2]) # Columna derecha más ancha para los costos
+                col_e1, col_e2 = st.columns([1, 1.2]) 
                 
                 with col_e1:
                     st.markdown("##### 🥣 Ingredientes")
@@ -633,62 +613,77 @@ def main_app():
 
                 with col_e2:
                     st.markdown("##### 💰 Estructura de Costos")
-                    st.info(f"Costo Ingredientes Base: **${total_receta_edit:,.0f}**")
+                    
+                    # --- CAMBIO AQUÍ: EDITOR DE RENDIMIENTO ---
+                    rendimiento_actual = var_data.get('rendimiento', 1)
+                    if rendimiento_actual is None: rendimiento_actual = 1
+                    
+                    new_rendimiento = st.number_input(
+                        "📦 Rendimiento (Unidades que salen)", 
+                        value=int(rendimiento_actual), 
+                        min_value=1,
+                        help="Corrige aquí: Pon 1 si es una torta entera. Pon 12 si son cupcakes."
+                    )
+                    # ------------------------------------------
+
+                    st.info(f"Costo Ingredientes Total: **${total_receta_edit:,.0f}**")
                     
                     with st.expander("⚙️ Configuración Avanzada de Costos", expanded=True):
-                        st.caption("Ajusta los parámetros para calcular el precio real.")
+                        c_p1, c_p2 = st.columns(2)
+                        p_merma = c_p1.slider("Merma %", 0, 15, 5, key="ed_merma")
+                        p_ops = c_p2.slider("G. Ops %", 0, 30, 15, key="ed_ops")
                         
-                        # PARÁMETROS CONFIGURABLES
-                        ep1, ep2 = st.columns(2)
-                        p_merma = ep1.slider("Merma (%)", 0, 15, 5, key="ed_merma")
-                        p_ops = ep2.slider("Gastos Ops (%)", 0, 30, 15, key="ed_ops")
-                        
-                        ep3, ep4 = st.columns(2)
-                        costo_mo = ep3.number_input("Mano de Obra ($)", value=6400, step=1000, help="2 horas aprox", key="ed_mo")
-                        p_maq = ep4.slider("Mantención Maq. (%)", 0, 20, 5, key="ed_maq")
+                        c_p3, c_p4 = st.columns(2)
+                        costo_mo = c_p3.number_input("Mano Obra $", value=6400, step=1000, key="ed_mo")
+                        p_maq = c_p4.slider("Maquinaria %", 0, 20, 5, key="ed_maq")
                         
                         st.divider()
-                        p_margen = st.slider("Margen Ganancia (%)", 10, 100, 60, key="ed_margen")
-                        costo_empaque = st.number_input("Costo Empaque ($)", value=3000, step=500, key="ed_empaque")
+                        p_margen = st.slider("Margen Ganancia %", 10, 100, 60, key="ed_margen")
+                        costo_empaque = st.number_input("Empaque $", value=3000, step=500, key="ed_empaque")
 
-                    # CÁLCULO EN TIEMPO REAL
-                    precio_sug_edit, breakdown = calcular_precio_final(
+                    # Calcular precio
+                    precio_sug_edit, bd = calcular_precio_final(
                         total_receta_edit, p_merma, p_ops, costo_mo, p_maq, p_margen, costo_empaque
                     )
                     
-                    # VISUALIZACIÓN DEL DESGLOSE
+                    # Ajustar si el rendimiento es mayor a 1 (Precio unitario)
+                    precio_final_unitario_sug = precio_sug_edit / new_rendimiento
+                    
                     st.markdown("---")
+                    if new_rendimiento > 1:
+                        st.markdown(f"**Costo Total Lote:** ${precio_sug_edit:,.0f}")
+                        st.markdown(f"**Costo Unitario Sugerido:** ${precio_final_unitario_sug:,.0f}")
+                    else:
+                        st.markdown(f"**Precio Sugerido:** ${precio_sug_edit:,.0f}")
+
                     st.markdown(f"""
-                    <div style="font-size: 14px;">
-                        Creating <b>Subtotal 1</b> (Insumos + Merma): ${breakdown['insumos'] + breakdown['merma']:,.0f}<br>
-                        + Gastos Ops ({p_ops}%): ${breakdown['ops']:,.0f}<br>
-                        + Mano de Obra: ${breakdown['mo']:,.0f}<br>
-                        + Maquinaria ({p_maq}%): ${breakdown['maq']:,.0f}<br>
-                        --------------------------------<br>
-                        <b>Costo Total Producción: ${(precio_sug_edit - breakdown['ganancia'] - breakdown['empaque']):,.0f}</b><br>
-                        + Ganancia ({p_margen}%): <span style="color:green; font-weight:bold">${breakdown['ganancia']:,.0f}</span><br>
-                        + Empaque: ${breakdown['empaque']:,.0f}
+                    <div style="font-size: 13px; color: #666;">
+                        Desglose: Insumos+Merma: ${bd['insumos']+bd['merma']:,.0f} | 
+                        Ganancia: <span style="color:green">${bd['ganancia']:,.0f}</span>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    st.markdown(f"#### Precio Sugerido: ${precio_sug_edit:,.0f}")
-                    
-                    precio_final_edit = st.number_input("Precio Venta Final ($)", value=int(precio_sug_edit), step=500, key="edit_precio_f")
+                    precio_final_edit = st.number_input("Precio Venta Final ($)", value=int(var_data['precio']), step=500, key="edit_precio_f")
                     
                     if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
                         try:
                             supabase.table('variaciones').update({
                                 "precio": precio_final_edit,
-                                "ingredientes_json": json.dumps(st.session_state.edit_ingredientes)
+                                "ingredientes_json": json.dumps(st.session_state.edit_ingredientes),
+                                "rendimiento": new_rendimiento # ACTUALIZAMOS EL RENDIMIENTO
                             }).eq('id', st.session_state.edit_var_id).execute()
-                            st.success("¡Actualizado correctamente!")
-                            st.session_state.edit_var_id = None
+                            
+                            # Actualizamos la sesión local para que se refleje de inmediato
+                            st.session_state.edit_var_data['rendimiento'] = new_rendimiento
+                            st.session_state.edit_var_data['precio'] = precio_final_edit
+                            
+                            st.success("¡Receta y Rendimiento actualizados!")
                             time.sleep(1.5)
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error: {e}")
                     
-                    if st.button("Cancelar"):
+                    if st.button("Salir del Editor"):
                         st.session_state.edit_var_id = None
                         st.rerun()
 
@@ -719,7 +714,7 @@ def main_app():
                         st.error(f"Error: {e}")
 
         # ---------------------------------------------------------
-        # TAB 3: CREAR VARIACIÓN (NUEVA CON CÁLCULO)
+        # TAB 3: CREAR VARIACIÓN
         # ---------------------------------------------------------
         with tab_variacion:
             st.subheader("Paso 2: Receta Específica")
@@ -736,21 +731,19 @@ def main_app():
                     col_sabor, col_tam = st.columns([2, 1])
                     with col_sabor: var_sabor = st.text_input("2. Sabor / Variedad", placeholder="Ej: Manjar Nuez")
                     with col_tam:
-                        opciones_tamano = ["12 Personas", "15 Personas", "18 Personas", "20 Personas", "30 Personas", "40 Personas", "45 Personas", "60 Personas", "Bandeja 12 Unid", "Individual"]
+                        opciones_tamano = ["12 Personas", "15 Personas", "20 Personas", "30 Personas", "40 Personas", "60 Personas", "Bandeja 12 Unid", "Individual"]
                         var_tamano = st.selectbox("3. Tamaño", opciones_tamano)
                         
-                        # Rendimiento Automático
                         val_rendimiento = 1
                         if "Bandeja 12" in var_tamano: val_rendimiento = 12
                         elif "Individual" in var_tamano: val_rendimiento = 1
-                        rendimiento_final = st.number_input("Rendimiento (Unidades que salen)", value=val_rendimiento, min_value=1, help="Si es torta pon 1. Si son cupcakes pon 12.")
+                        rendimiento_final = st.number_input("Rendimiento (Unidades que salen)", value=val_rendimiento, min_value=1)
 
                     nombre_completo = f"{var_sabor} - {var_tamano}" if var_sabor else var_tamano
                     st.info(f"📝 Creando: **{nombre_completo}**")
 
-                    col_izq, col_der = st.columns([1, 1.2]) # Layout 2 columnas
+                    col_izq, col_der = st.columns([1, 1.2]) 
                     
-                    # --- IZQUIERDA: INGREDIENTES ---
                     with col_izq:
                         st.markdown("##### 🥣 Ingredientes")
                         if 'var_ingredientes' not in st.session_state: st.session_state.var_ingredientes = []
@@ -790,7 +783,6 @@ def main_app():
                                 st.session_state.var_ingredientes.pop(i)
                                 st.rerun()
 
-                    # --- DERECHA: CALCULADORA COSTOS ---
                     with col_der:
                         st.markdown("##### 💰 Calculadora de Precios")
                         st.info(f"Costo Ingredientes: **${total_receta:,.0f}**")
@@ -801,20 +793,16 @@ def main_app():
                             p_ops = c_p2.slider("G. Ops %", 0, 30, 15)
                             
                             c_p3, c_p4 = st.columns(2)
-                            costo_mo = c_p3.number_input("Mano Obra $", value=6400, step=500)
+                            costo_mo = c_p3.number_input("Mano Obra $", value=6400, step=1000)
                             p_maq = c_p4.slider("Maquinaria %", 0, 20, 5)
                             
                             p_margen = st.slider("Margen Ganancia %", 10, 100, 60)
                             costo_empaque = st.number_input("Empaque $", value=3000, step=500)
 
-                        # Calcular
                         precio_sug, bd = calcular_precio_final(total_receta, p_merma, p_ops, costo_mo, p_maq, p_margen, costo_empaque)
                         
                         st.markdown(f"""
                         <div style="background:#f8f9fa; padding:10px; border-radius:5px; font-size:13px;">
-                            <b>Desglose del Costo:</b><br>
-                            Subtotal 1 (Con Merma): ${bd['insumos']+bd['merma']:,.0f}<br>
-                            + Ops: ${bd['ops']:,.0f} | + MO: ${bd['mo']:,.0f} | + Maq: ${bd['maq']:,.0f}<br>
                             <b>Costo Prod. Total: ${(precio_sug - bd['ganancia'] - bd['empaque']):,.0f}</b><br>
                             <span style="color:green">+ Ganancia: ${bd['ganancia']:,.0f}</span> | + Empaque: ${bd['empaque']:,.0f}
                         </div>
