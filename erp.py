@@ -67,10 +67,8 @@ def init_connection():
         key = st.secrets["supabase"]["key"]
         return create_client(url, key)
     except Exception as e:
-        # Aquí mostramos el error detallado si la conexión falla
+        # ¡ESTO MOSTRARÁ LA CAUSA REAL DEL FALLO EN LA PANTALLA!
         st.error(f"¡ERROR FATAL DE CONEXIÓN! Detalle: {e}") 
-        # Esta línea puede ser útil si el error es 'KeyError' por falta de secrets:
-        # st.error(f"DEBUG: st.secrets keys: {list(st.secrets.keys())}") 
         return None
 
 supabase = init_connection()
@@ -309,380 +307,785 @@ def main_app():
             st.info("Aún no hay suficientes movimientos para generar gráficos.")
 
     # ==========================================
-    # 📌 PEDIDOS
+    # 🛒 PEDIDOS (V5: FUNCIONAL CON NUEVA BD)
     # ==========================================
-    elif menu == "📌 Pedidos":
-        col_header, col_btn = st.columns([3, 1])
-        with col_header:
-            st.title("Gestión de Pedidos")
-            st.markdown("Control de producción y devoluciones.")
+    elif menu == "🛒 Pedidos" or menu == "📌 Pedidos": # Aceptamos ambos nombres por si acaso
+        st.title("🛒 Gestión de Pedidos")
+
+        # 1. Cargar Datos del Catálogo
+        mapa_productos_base = {}
+        todas_variaciones = []
+        lista_bases_nombres = []
         
-        prod_dict = {}
         if supabase:
             try:
-                prs = supabase.table('recetas').select("*").execute().data
-                for p in prs: prod_dict[p['nombre']] = p
-            except: pass
+                # Cargar Bases
+                data_p = supabase.table('productos').select("*").order('nombre').execute().data
+                if data_p:
+                    mapa_productos_base = {p['nombre']: p for p in data_p}
+                    lista_bases_nombres = list(mapa_productos_base.keys())
 
-        with col_btn:
-            st.write("")
-            with st.popover("➕ Crear Nuevo Pedido", use_container_width=True):
-                st.markdown("### 🛒 Nuevo Pedido")
-                c1, c2 = st.columns(2)
-                n_cli = c1.text_input("Nombre Cliente")
-                n_tel = c2.text_input("Teléfono")
-                n_fec = st.date_input("Fecha Entrega")
-                st.divider()
-                
-                if 'carrito_pedido' not in st.session_state: 
-                    st.session_state.carrito_pedido = []
-                
-                if not prod_dict:
-                    st.warning("Crea productos primero.")
-                else:
-                    col_prod, col_cant, col_add = st.columns([2, 1, 1])
-                    prod_selec = col_prod.selectbox("Producto", list(prod_dict.keys()), key="sel_prod")
-                    cant_prod = col_cant.number_input("Cantidad", 1, 100, 1, key="cant_prod")
-                    
-                    if col_add.button("Añadir"):
-                        p_unit = prod_dict[prod_selec]['precio_venta']
-                        st.session_state.carrito_pedido.append({
-                            "producto": prod_selec,
-                            "cantidad": cant_prod,
-                            "precio_unit": p_unit,
-                            "subtotal": cant_prod * p_unit
-                        })
-                    
-                    if st.session_state.carrito_pedido:
-                        df_c = pd.DataFrame(st.session_state.carrito_pedido)
-                        st.dataframe(df_c[['producto', 'cantidad', 'subtotal']], hide_index=True)
-                        total = df_c['subtotal'].sum()
-                        st.markdown(f"**Total: ${total:,.0f}**")
-                        n_not = st.text_area("Notas / Dedicatoria")
-                        
-                        if st.button("Confirmar Pedido", type="primary"):
-                            if n_cli:
-                                supabase.table('pedidos').insert({
-                                    "cliente_nombre": n_cli,
-                                    "cliente_telefono": n_tel,
-                                    "fecha_entrega": str(n_fec),
-                                    "estado": "Pendiente",
-                                    "detalle_json": json.dumps(st.session_state.carrito_pedido),
-                                    "total_pedido": total,
-                                    "notas_extra": n_not
-                                }).execute()
-                                st.session_state.carrito_pedido = []
-                                st.rerun()
+                # Cargar Variaciones (Hijos)
+                todas_variaciones = supabase.table('variaciones').select("*").execute().data
+            except Exception as e:
+                st.error(f"Error conectando al catálogo: {e}")
 
-        # KANBAN
-        if supabase:
-            try:
-                ped = supabase.table('pedidos').select("*").neq('estado', 'Cancelado').order('fecha_entrega').execute().data
-            except:
-                ped = []
-            
-            c1, c2, c3, c4 = st.columns(4)
-            cols = {"Pendiente": c1, "En Proceso": c2, "Listo": c3, "Entregado": c4}
-            with c1: st.markdown("##### 📝 Pendientes")
-            with c2: st.markdown("##### 🔥 En Horno")
-            with c3: st.markdown("##### ✅ Para Retiro")
-            with c4: st.markdown("##### 🚚 Entregados")
-            
-            if not ped:
-                st.info("No hay pedidos activos.")
-            
-            for p in ped:
-                est = p.get('estado', 'Pendiente')
-                col = cols.get(est, c1)
-                
-                det_html = ""
-                if p.get('detalle_json'):
-                    try:
-                        its = json.loads(p['detalle_json'])
-                        det_html = "<ul style='font-size:0.8em;padding-left:15px;color:#555;margin:5px 0;'>"
-                        for i in its:
-                            det_html += f"<li>{i['cantidad']}x {i['producto']}</li>"
-                        det_html += "</ul>"
-                    except: pass
-                
-                b_cls = "badge-gray"
-                if est == "Pendiente": b_cls = "badge-yellow"
-                elif est == "En Proceso": b_cls = "badge-blue"
-                elif est == "Listo": b_cls = "badge-green"
-                
-                with col:
-                    st.markdown(f"""
-                    <div class="kanban-card">
-                        <div style="display:flex;justify-content:space-between;">
-                            <span style="font-weight:bold;color:#f2590d">#{p['id']}</span>
-                            <span class="badge {b_cls}">{est}</span>
-                        </div>
-                        <div style="font-weight:bold;">{p['cliente_nombre']}</div>
-                        {det_html}
-                        <div style="font-weight:bold;text-align:right;">${p.get('total_pedido', 0):,.0f}</div>
-                        <div style="color:#666;font-size:0.8em;margin-top:5px;">📅 {p['fecha_entrega']}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    c_act, c_cancel = st.columns([3, 1])
-                    with c_act:
-                        if est == 'Pendiente':
-                            if st.button("Cocinar ➡️", key=f"c{p['id']}"): 
-                                cambiar_estado_pedido(p['id'], "En Proceso")
-                        elif est == 'En Proceso':
-                            if st.button("Listo ✅", key=f"l{p['id']}"): 
-                                cambiar_estado_pedido(p['id'], "Listo")
-                        elif est == 'Listo':
-                            if st.button("Entregar 🎁", key=f"e{p['id']}"): 
-                                cambiar_estado_pedido(p['id'], "Entregado", p)
-                    
-                    with c_cancel:
-                        if st.button("❌", key=f"del_{p['id']}", help="Cancelar y devolver stock"):
-                            cambiar_estado_pedido(p['id'], "Cancelado", p)
+        tab_nuevo, tab_tablero = st.tabs(["➕ Nuevo Pedido", "📋 Tablero de Cocina"])
 
-    # ==========================================
-    # 🧁 PRODUCTOS
-    # ==========================================
-    elif menu == "🧁 Mis Productos":
-        st.title("Catálogo de Productos y Fichas Técnicas")
-        st.markdown("Aquí creas lo que vendes. Asigna categoría e ingredientes para calcular costos.")
-
-        ins_d = {}
-        if supabase:
-            ir = supabase.table('insumos').select("*").execute().data
-            for i in ir: 
-                ins_d[i['nombre']] = i
-        
-        tab_catalogo, tab_nuevo = st.tabs(["📖 Ver Catálogo", "➕ Crear Nuevo Producto"])
-        
-        # --- CREAR PRODUCTO ---
+        # --- TAB: NUEVO PEDIDO ---
         with tab_nuevo:
-            st.subheader("Nuevo Producto")
+            st.subheader("Ingresar Orden de Cliente")
             
-            if 'nuevo_prod_ingredientes' not in st.session_state:
-                st.session_state.nuevo_prod_ingredientes = []
-            
-            col_datos, col_ing = st.columns([1, 1])
-            
-            with col_datos:
-                n_nombre = st.text_input("Nombre del Producto", placeholder="Ej: Torta Amor 20p")
-                n_cat = st.selectbox("Categoría", ["Tortas", "Cóctel Dulce", "Cóctel Salado", "Pasteles (Individuales)", "Otros"])
-                n_img = st.text_input("URL Imagen (Opcional)", placeholder="https://imgur.com/...", help="Pega aquí un link directo a la foto de tu producto.")
+            if not lista_bases_nombres:
+                st.warning("⚠️ El catálogo está vacío. Ve a 'Mis Productos' para crear tortas primero.")
+            else:
+                col_cliente, col_prod = st.columns([1, 2])
                 
-                st.divider()
-                st.markdown("##### Ficha Técnica (Ingredientes)")
-                
-                if ins_d:
-                    opciones_insumos = list(ins_d.keys())
-                    insumo_selec = st.selectbox("Selecciona Insumo", opciones_insumos)
-                    unidad_insumo = ins_d[insumo_selec]['unidad_medida']
+                with col_cliente:
+                    st.markdown("##### 👤 Cliente")
+                    cliente_nombre = st.text_input("Nombre Cliente", key="cli_nom")
+                    cliente_contacto = st.text_input("Teléfono / WhatsApp", key="cli_tel")
                     
-                    c_cant, c_btn = st.columns([2, 1])
-                    cantidad = c_cant.number_input(f"Cantidad ({unidad_insumo})", min_value=0.0, step=0.1, format="%.2f")
+                    st.markdown("##### 📅 Entrega")
+                    fecha_entrega = st.date_input("Fecha Comprometida")
+                    hora_entrega = st.time_input("Hora Aprox")
+
+                with col_prod:
+                    st.markdown("##### 🎂 Selección de Producto")
                     
-                    if c_btn.button("⬇️ Agregar"):
-                        if cantidad > 0:
-                            st.session_state.nuevo_prod_ingredientes.append({
-                                "nombre": insumo_selec,
-                                "cantidad": cantidad,
-                                "unidad": unidad_insumo,
-                                "id_insumo": ins_d[insumo_selec]['id']
-                            })
-                            st.toast(f"Agregado: {insumo_selec}")
+                    # 1. Selector de BASE (Masa)
+                    base_selec = st.selectbox("1. Tipo de Masa / Base", lista_bases_nombres, index=None, key="new_base_sel", placeholder="Selecciona masa...")
+                    
+                    variacion_data = None
+                    precio_sugerido = 0
+
+                    if base_selec:
+                        id_base = mapa_productos_base[base_selec]['id']
+                        # Filtrar hijos que pertenezcan a esta base
+                        vars_filtradas = [v for v in todas_variaciones if v['producto_id'] == id_base]
+                        
+                        if not vars_filtradas:
+                            st.warning(f"La '{base_selec}' no tiene tamaños ni sabores creados. Edítala en el Catálogo.")
+                        else:
+                            # Crear mapa
+                            mapa_vars = {v['nombre']: v for v in vars_filtradas}
+                            
+                            # 2. Selector de VARIACIÓN (Sabor y Tamaño)
+                            var_selec_nombre = st.selectbox("2. Sabor y Tamaño", list(mapa_vars.keys()), index=None, key="new_var_sel", placeholder="Elige variedad...")
+                            
+                            if var_selec_nombre:
+                                variacion_data = mapa_vars[var_selec_nombre]
+                                precio_sugerido = variacion_data['precio']
+                                st.success(f"✅ Seleccionado: **{base_selec}** | **{var_selec_nombre}**")
+
+                    st.divider()
+                    
+                    c_cant, c_precio = st.columns(2)
+                    cantidad = c_cant.number_input("Cantidad", 1, 50, 1)
+                    precio_final = c_precio.number_input("Precio Final Unitario ($)", value=int(precio_sugerido), step=500)
+                    
+                    total_calc = cantidad * precio_final
+                    st.markdown(f"<h2 style='text-align:right; color:#f2590d'>Total: ${total_calc:,.0f}</h2>", unsafe_allow_html=True)
+                    
+                    notas = st.text_area("📝 Notas Especiales (Dedicatoria, Alergias, Diseño)")
+
+                    if st.button("💾 Confirmar Pedido", type="primary", use_container_width=True):
+                        if cliente_nombre and variacion_data:
+                            try:
+                                datos = {
+                                    "cliente_nombre": cliente_nombre,
+                                    "cliente_contacto": cliente_contacto,
+                                    "fecha_entrega": str(fecha_entrega),
+                                    "hora_entrega": str(hora_entrega),
+                                    "variacion_id": variacion_data['id'],
+                                    "nombre_producto_snapshot": f"{base_selec} - {variacion_data['nombre']}",
+                                    "cantidad": cantidad,
+                                    "precio_unitario_final": precio_final,
+                                    "total_pedido": total_calc,
+                                    "estado": "Pendiente",
+                                    "notas": notas
+                                }
+                                supabase.table('pedidos').insert(datos).execute()
+                                st.balloons()
+                                st.success("¡Pedido enviado a cocina!")
+                                time.sleep(1.5)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error guardando: {e}")
+                        else:
+                            st.error("Faltan datos del cliente o seleccionar producto.")
+
+        # --- TAB: KANBAN ---
+        with tab_tablero:
+            st.subheader("📋 Tablero de Producción")
             
-            with col_ing:
-                st.markdown("##### 📋 Resumen del Producto")
-                st.info(f"Categoría: **{n_cat}**")
-                
-                # Previsualizar imagen
-                if n_img:
-                    st.image(n_img, caption="Vista previa", use_container_width=True)
-                
-                if st.session_state.nuevo_prod_ingredientes:
-                    df_prev = pd.DataFrame(st.session_state.nuevo_prod_ingredientes)
-                    st.dataframe(df_prev[['nombre', 'cantidad', 'unidad']], hide_index=True, use_container_width=True)
-                    
-                    # Calcular Costo
-                    costo_total = 0
-                    for item in st.session_state.nuevo_prod_ingredientes:
-                        if item['nombre'] in ins_d:
-                            precio = ins_d[item['nombre']]['costo_unitario']
-                            costo_total += (item['cantidad'] * precio)
-                    
-                    st.metric("Costo Producción", f"${costo_total:,.0f}")
-                    
-                    margen = st.slider("Margen Ganancia (%)", 10, 100, 40)
-                    if margen < 100:
-                        precio_sug = costo_total / (1 - (margen/100))
-                    else:
-                        precio_sug = 0
-                    
-                    precio_final = st.number_input("Precio de Venta Final ($)", value=int(precio_sug), step=100)
-                    
-                    if st.button("💾 Guardar Producto", type="primary", use_container_width=True):
-                        if n_nombre:
-                            datos = {
-                                "nombre": n_nombre,
-                                "categoria": n_cat,
-                                "ingredientes_json": json.dumps(st.session_state.nuevo_prod_ingredientes),
-                                "precio_venta": precio_final,
-                                "imagen_url": n_img
-                            }
-                            supabase.table('recetas').insert(datos).execute()
-                            st.success(f"Producto '{n_nombre}' creado!")
-                            st.session_state.nuevo_prod_ingredientes = []
-                            time.sleep(1)
-                            st.rerun()
-        
-        # --- CATÁLOGO ---
-        with tab_catalogo:
-            st.subheader("Mis Productos")
-            
-            prods_db = []
+            # Cargar pedidos activos
+            pedidos_activos = []
             if supabase:
                 try:
-                    prods_db = supabase.table('recetas').select("*").execute().data
+                    # Traemos todo lo que no esté Cancelado ni Entregado (histórico)
+                    pedidos_activos = supabase.table('pedidos').select("*").neq('estado', 'Cancelado').neq('estado', 'Entregado').order('fecha_entrega').execute().data
                 except: pass
             
-            if prods_db:
-                df_prods = pd.DataFrame(prods_db)
-                
-                # Filtro por Categoría
-                cats = df_prods['categoria'].unique() if 'categoria' in df_prods.columns else []
-                if len(cats) > 0:
-                    cat_filter = st.multiselect("Filtrar por Categoría", cats)
-                    if cat_filter:
-                        df_prods = df_prods[df_prods['categoria'].isin(cat_filter)]
-                
-                # Grid de Productos
-                for index, row in df_prods.iterrows():
-                    cat_show = row.get('categoria', 'Sin Categoría')
-                    precio_show = row.get('precio_venta', 0)
-                    
-                    with st.expander(f"🧁 {row['nombre']} ({cat_show}) - ${precio_show:,.0f}"):
-                        col_img, col_info = st.columns([1, 2])
+            if not pedidos_activos:
+                st.info("🎉 No hay pedidos pendientes. ¡Todo al día!")
+            else:
+                for p in pedidos_activos:
+                    # Tarjeta de Pedido
+                    with st.container():
+                        st.markdown(f"""
+                        <div class="kanban-card">
+                            <div style="display:flex; justify-content:space-between;">
+                                <span>🆔 <b>#{p['id']}</b></span>
+                                <span>📅 <b>{p['fecha_entrega']}</b></span>
+                            </div>
+                            <h4 style="margin:5px 0">{p['cliente_nombre']}</h4>
+                            <p style="color:#666">🍰 {p['nombre_producto_snapshot']} (x{p['cantidad']})</p>
+                            <p><i>Nota: {p.get('notas') or 'Sin notas'}</i></p>
+                        </div>
+                        """, unsafe_allow_html=True)
                         
-                        with col_img:
-                            if row.get('imagen_url'):
-                                st.image(row['imagen_url'], use_container_width=True)
-                            else:
-                                st.info("Sin imagen")
+                        col_state, col_btns = st.columns([2, 3])
                         
-                        with col_info:
-                            st.markdown(f"**Categoría:** {cat_show}")
-                            st.markdown(f"**Precio:** ${precio_show:,.0f}")
-                            st.markdown("**Ingredientes:**")
-                            try:
-                                ings = json.loads(row['ingredientes_json'])
-                                for i in ings:
-                                    st.text(f"• {i['cantidad']} {i['unidad']} {i['nombre']}")
-                            except:
-                                st.text("Sin detalle.")
+                        with col_state:
+                            st.caption("Estado Actual:")
+                            if p['estado'] == 'Pendiente': st.warning("🟡 Pendiente")
+                            elif p['estado'] == 'En Horno': st.info("🔵 En Horno")
+                            elif p['estado'] == 'Listo': st.success("🟢 Listo para Retiro")
+                        
+                        with col_btns:
+                            st.caption("Acciones:")
+                            c_b1, c_b2, c_b3 = st.columns(3)
                             
-                            if st.button("🗑️ Borrar Producto", key=f"del_{row['id']}"):
-                                supabase.table('recetas').delete().eq('id', row['id']).execute()
+                            # Lógica de Botones según estado
+                            if p['estado'] == 'Pendiente':
+                                if c_b1.button("🔥 Horno", key=f"h_{p['id']}"):
+                                    supabase.table('pedidos').update({'estado': 'En Horno'}).eq('id', p['id']).execute()
+                                    st.rerun()
+                            
+                            if p['estado'] == 'En Horno':
+                                if c_b2.button("✅ Listo", key=f"l_{p['id']}"):
+                                    supabase.table('pedidos').update({'estado': 'Listo'}).eq('id', p['id']).execute()
+                                    st.rerun()
+                                    
+                            if p['estado'] == 'Listo':
+                                if c_b3.button("🚚 Entregar", key=f"e_{p['id']}"):
+                                    supabase.table('pedidos').update({'estado': 'Entregado'}).eq('id', p['id']).execute()
+                                    # Registrar Venta en Gastos (Ingreso positivo)
+                                    registrar_gasto(p['total_pedido'] * 1, f"Venta Pedido #{p['id']} - {p['cliente_nombre']}")
+                                    st.toast("¡Pedido Entregado y Venta Registrada!")
+                                    time.sleep(1.5)
+                                    st.rerun()
+                            
+                            # Botón cancelar siempre disponible
+                            if st.button("❌ Cancelar", key=f"c_{p['id']}"):
+                                supabase.table('pedidos').update({'estado': 'Cancelado'}).eq('id', p['id']).execute()
+                                st.rerun()
+                        st.divider()
+
+    # ==========================================
+    # 🧁 PRODUCTOS Y VARIACIONES (V9: EDICIÓN TOTAL + FOTOS BASE)
+    # ==========================================
+    elif menu == "🧁 Mis Productos":
+        st.title("🧁 Catálogo Maestro")
+        st.markdown("Gestiona tus masas base y crea sus variaciones con medidas de cocina incluidas.")
+
+        # --- HELPER: Conversión para Recetas ---
+        def convertir_a_base(cantidad, unidad_receta, unidad_inventario):
+            if unidad_receta == unidad_inventario: return cantidad
+            
+            # Estandarizamos medidas de cocina (Promedios repostería)
+            factor_cdta = 5   # 1 cdta = 5 gr/ml
+            factor_cda = 15   # 1 cda  = 15 gr/ml
+
+            # Conversiones de Peso (Si inventario está en KG o GR)
+            if unidad_inventario == 'kg':
+                if unidad_receta == 'gr': return cantidad / 1000
+                if unidad_receta == 'cdta': return (cantidad * factor_cdta) / 1000 
+                if unidad_receta == 'cda': return (cantidad * factor_cda) / 1000
+            
+            if unidad_inventario == 'gr':
+                if unidad_receta == 'kg': return cantidad * 1000
+                if unidad_receta == 'cdta': return cantidad * factor_cdta
+                if unidad_receta == 'cda': return cantidad * factor_cda
+            
+            # Conversiones de Volumen (Si inventario está en LT o ML)
+            if unidad_inventario == 'lt':
+                if unidad_receta in ['ml', 'cc']: return cantidad / 1000
+                if unidad_receta == 'cdta': return (cantidad * factor_cdta) / 1000
+                if unidad_receta == 'cda': return (cantidad * factor_cda) / 1000
+            
+            if unidad_inventario in ['ml', 'cc']:
+                if unidad_receta == 'lt': return cantidad * 1000
+                if unidad_receta == 'cdta': return cantidad * factor_cdta
+                if unidad_receta == 'cda': return cantidad * factor_cda
+            return 0 
+
+        # Cargar Datos
+        mapa_insumos = {}
+        lista_productos_base = []
+        mapa_productos_base = {}
+
+        if supabase:
+            try:
+                data_i = supabase.table('insumos').select("*").order('nombre').execute().data
+                mapa_insumos = {i['nombre']: i for i in data_i}
+                
+                data_p = supabase.table('productos').select("*").order('nombre').execute().data
+                lista_productos_base = [p['nombre'] for p in data_p]
+                mapa_productos_base = {p['nombre']: p for p in data_p}
+            except: pass
+        
+        # TABS
+        tab_catalogo, tab_base, tab_variacion, tab_editor = st.tabs(["📖 Ver Catálogo", "✨ 1. Crear Masa Base", "🍰 2. Crear Variación", "✏️ Editor de Recetas"])
+        
+        # ---------------------------------------------------------
+        # TAB 4: EDITOR DE RECETAS (VARIACIONES)
+        # ---------------------------------------------------------
+        with tab_editor:
+            st.subheader("✏️ Editor de Recetas (Hijos)")
+            
+            if 'edit_var_id' not in st.session_state:
+                st.session_state.edit_var_id = None
+                
+            if st.session_state.edit_var_id is None:
+                st.info("👈 Ve a la pestaña 'Ver Catálogo' y presiona el botón '✏️ Editar Receta' en alguna variación.")
+            else:
+                var_data = st.session_state.edit_var_data
+                st.markdown(f"Editando Variación: **{var_data['nombre']}**")
+                
+                col_e1, col_e2 = st.columns([1, 1])
+                
+                with col_e1:
+                    st.markdown("##### 🥣 Modificar Ingredientes")
+                    insumo_k = st.selectbox("Agregar Insumo", list(mapa_insumos.keys()), index=None, key="edit_sel_ins")
+                    if insumo_k:
+                        d_ins = mapa_insumos[insumo_k]
+                        u_base = d_ins['unidad_medida']
+                        cc1, cc2 = st.columns(2)
+                        v_cant = cc1.number_input("Cant.", 0.0, format="%.2f", key="edit_cant")
+                        
+                        opts = [u_base]
+                        if u_base == 'kg': opts = ['gr', 'kg', 'cdta', 'cda']
+                        elif u_base == 'gr': opts = ['gr', 'kg', 'cdta', 'cda']
+                        elif u_base == 'lt': opts = ['ml', 'lt', 'cc', 'cdta', 'cda']
+                        elif u_base in ['ml', 'cc']: opts = ['ml', 'lt', 'cc', 'cdta', 'cda']
+                        
+                        v_uni = cc2.selectbox("Unidad", opts, key="edit_uni")
+                        
+                        if st.button("➕ Añadir a la Mezcla", key="edit_add_btn"):
+                            if v_cant > 0:
+                                cant_norm = convertir_a_base(v_cant, v_uni, u_base)
+                                costo_linea = cant_norm * d_ins['costo_unitario']
+                                st.session_state.edit_ingredientes.append({
+                                    "nombre": insumo_k, "cantidad": v_cant, "unidad": v_uni, 
+                                    "costo": costo_linea, "insumo_id": d_ins['id']
+                                })
                                 st.rerun()
 
-    # ==========================================
-    # 📦 INVENTARIO
-    # ==========================================
-    elif menu == "📦 Inventario":
-        with st.expander("➕ Ingresar Compra de Insumos (Registrar Gasto)", expanded=False):
-            c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 1])
-            with c1: n_nom = st.text_input("Nombre Insumo")
-            with c2: n_uni = st.selectbox("Unidad", ["kg", "unidades", "lt", "gr", "ml", "caja", "paquete"])
-            with c3: n_cos = st.number_input("Costo Unitario", min_value=0)
-            with c4: n_stk = st.number_input("Cantidad Comprada", min_value=0.0)
-            
-            registrar_en_finanzas = st.checkbox("Registrar como Gasto en Finanzas", value=True)
-            
-            with c5:
-                st.write("")
-                st.write("")
-                if st.button("Ingresar Stock"):
-                    if n_nom:
-                        # 1. Actualizar Stock
-                        existente = supabase.table('insumos').select("*").eq('nombre', n_nom).execute().data
-                        if existente:
-                            id_exist = existente[0]['id']
-                            stock_ant = existente[0]['stock_actual']
-                            nuevo_stock = stock_ant + n_stk
-                            supabase.table('insumos').update({
-                                "stock_actual": nuevo_stock,
-                                "costo_unitario": n_cos
-                            }).eq('id', id_exist).execute()
-                        else:
-                            supabase.table('insumos').insert({
-                                "nombre": n_nom,
-                                "unidad_medida": n_uni,
-                                "costo_unitario": n_cos,
-                                "stock_actual": n_stk
-                            }).execute()
+                with col_e2:
+                    st.markdown("##### 📋 Lista Actual")
+                    total_receta_edit = 0
+                    
+                    for idx, ing in enumerate(st.session_state.edit_ingredientes):
+                        costo_actual = ing['costo']
+                        if ing['nombre'] in mapa_insumos:
+                            d_actual = mapa_insumos[ing['nombre']]
+                            cant_norm = convertir_a_base(ing['cantidad'], ing['unidad'], d_actual['unidad_medida'])
+                            costo_actual = cant_norm * d_actual['costo_unitario']
                         
-                        # 2. Registrar Gasto Financiero
-                        if registrar_en_finanzas:
-                            total_compra = n_cos * n_stk
-                            registrar_gasto(total_compra, f"Compra: {n_nom} ({n_stk}{n_uni})")
-                            st.toast(f"Gasto de ${total_compra} registrado", icon="💸")
+                        ing['costo'] = costo_actual
+                        total_receta_edit += costo_actual
                         
-                        st.success("Inventario Actualizado")
-                        time.sleep(1)
+                        c_txt, c_btn = st.columns([4, 1])
+                        c_txt.markdown(f"**• {ing['cantidad']} {ing['unidad']} {ing['nombre']}** (${costo_actual:,.0f})")
+                        if c_btn.button("🗑️", key=f"del_edit_{idx}"):
+                            st.session_state.edit_ingredientes.pop(idx)
+                            st.rerun()
+                    
+                    st.divider()
+                    st.markdown(f"#### Costo Producción: ${total_receta_edit:,.0f}")
+                    
+                    margen_edit = st.slider("Nuevo Margen %", 10, 200, 50, key="edit_margen")
+                    sugerido = total_receta_edit / (1 - (margen_edit/100)) if margen_edit < 100 else total_receta_edit * (1 + margen_edit/100)
+                    st.caption(f"Sugerido: ${sugerido:,.0f}")
+                    
+                    precio_final_edit = st.number_input("Precio Venta Final", value=int(var_data['precio']), step=500, key="edit_precio")
+                    
+                    if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
+                        try:
+                            supabase.table('variaciones').update({
+                                "precio": precio_final_edit,
+                                "ingredientes_json": json.dumps(st.session_state.edit_ingredientes)
+                            }).eq('id', st.session_state.edit_var_id).execute()
+                            
+                            st.success("¡Receta actualizada!")
+                            st.session_state.edit_var_id = None
+                            time.sleep(1.5)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al actualizar: {e}")
+                    
+                    if st.button("Cancelar Edición"):
+                        st.session_state.edit_var_id = None
                         st.rerun()
-        
-        st.title("📦 Inventario Actual")
-        
-        if supabase:
-            response = supabase.table('insumos').select("*").order('nombre').execute()
-            datos_reales = response.data
-            if datos_reales:
-                df = pd.DataFrame(datos_reales)
+
+        # ---------------------------------------------------------
+        # TAB 2: CREAR PRODUCTO BASE
+        # ---------------------------------------------------------
+        with tab_base:
+            st.subheader("Paso 1: Definir Tipo de Masa")
+            c1, c2 = st.columns([2, 1])
+            pb_nombre = c1.text_input("Nombre de la Base", placeholder="Ej: Torta Bizcocho Tradicional")
+            pb_cat = c2.selectbox("Categoría", ["Tortas", "Cóctel", "Individuales", "Bollería"])
+            pb_img = c1.text_input("URL Imagen Referencial", placeholder="http://...")
+            
+            if st.button("💾 Guardar Base"):
+                if pb_nombre:
+                    try:
+                        exist = supabase.table('productos').select('id').eq('nombre', pb_nombre).execute().data
+                        if exist:
+                            st.warning("¡Esa base ya existe!")
+                        else:
+                            supabase.table('productos').insert({
+                                "nombre": pb_nombre, "categoria": pb_cat, "imagen_url": pb_img
+                            }).execute()
+                            st.success(f"Creado: {pb_nombre}")
+                            time.sleep(1.5)
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+        # ---------------------------------------------------------
+        # TAB 3: CREAR VARIACIÓN
+        # ---------------------------------------------------------
+        with tab_variacion:
+            st.subheader("Paso 2: Receta Específica")
+            
+            if not lista_productos_base:
+                st.warning("Primero crea una Base en la pestaña anterior.")
+            else:
+                sel_padre = st.selectbox("1. Selecciona el Tipo de Masa", lista_productos_base)
                 
-                st.markdown("### 📋 Control de Bodega")
-                df_edit = st.data_editor(
-                    df,
-                    key="inv_edit",
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    column_config={
-                        "id": None,
-                        "stock_actual": st.column_config.NumberColumn("Stock", format="%.2f"),
-                        "costo_unitario": st.column_config.NumberColumn("Costo $", format="$%d")
-                    }
-                )
-                
-                if st.button("💾 Guardar Ajustes Manuales"):
-                    recs = df_edit.to_dict('records')
-                    for r in recs:
-                        d = {k: v for k, v in r.items() if k in ['id', 'nombre', 'unidad_medida', 'stock_actual', 'costo_unitario']}
-                        if pd.isna(d.get('id')):
-                            del d['id']
-                        supabase.table('insumos').upsert(d).execute()
+                if sel_padre:
+                    id_padre = mapa_productos_base[sel_padre]['id']
+                    st.divider()
                     
-                    # Borrar eliminados
-                    ids_orig = set(df['id'].tolist())
-                    ids_new = set(df_edit['id'].dropna().tolist())
-                    for i_del in (ids_orig - ids_new):
-                        supabase.table('insumos').delete().eq('id', i_del).execute()
+                    # DATOS
+                    col_sabor, col_tam = st.columns([2, 1])
+                    with col_sabor: var_sabor = st.text_input("2. Sabor / Variedad", placeholder="Ej: Manjar Nuez")
+                    with col_tam:
+                        opciones_tamano = ["12 Personas", "15 Personas", "20 Personas", "30 Personas", "40 Personas", "60 Personas", "Bandeja 12 Unid", "Individual"]
+                        var_tamano = st.selectbox("3. Tamaño", opciones_tamano)
+                        val_rendimiento = 1
+                        if "Bandeja 12" in var_tamano: val_rendimiento = 12
+                        elif "Individual" in var_tamano: val_rendimiento = 1
+                        rendimiento_final = st.number_input("Rendimiento", value=val_rendimiento, min_value=1)
+
+                    nombre_completo = f"{var_sabor} - {var_tamano}" if var_sabor else var_tamano
+                    st.info(f"📝 Creando: **{nombre_completo}**")
+
+                    st.markdown("##### 🥣 Ingredientes")
                     
-                    st.success("Guardado")
-                    st.rerun()
+                    if 'var_ingredientes' not in st.session_state: st.session_state.var_ingredientes = []
+                    
+                    c_input, c_list = st.columns([1, 1])
+                    with c_input:
+                        insumo_k = st.selectbox("Buscar Insumo", list(mapa_insumos.keys()), index=None, placeholder="Escribe ingrediente...")
+                        if insumo_k:
+                            d_ins = mapa_insumos[insumo_k]
+                            u_base = d_ins['unidad_medida']
+                            st.caption(f"Costo: ${d_ins['costo_unitario']:,.0f} / {u_base}")
+                            
+                            cc1, cc2 = st.columns(2)
+                            v_cant = cc1.number_input("Cantidad", 0.0, format="%.2f")
+                            
+                            opts = [u_base]
+                            if u_base == 'kg': opts = ['gr', 'kg', 'cdta', 'cda']
+                            elif u_base == 'gr': opts = ['gr', 'kg', 'cdta', 'cda']
+                            elif u_base == 'lt': opts = ['ml', 'lt', 'cc', 'cdta', 'cda']
+                            elif u_base in ['ml', 'cc']: opts = ['ml', 'lt', 'cc', 'cdta', 'cda']
+                            
+                            v_uni = cc2.selectbox("Unidad Receta", opts)
+                            
+                            if st.button("⬇️ Agregar"):
+                                if v_cant > 0:
+                                    cant_norm = convertir_a_base(v_cant, v_uni, u_base)
+                                    if cant_norm > 0:
+                                        costo_linea = cant_norm * d_ins['costo_unitario']
+                                        st.session_state.var_ingredientes.append({
+                                            "nombre": insumo_k, "cantidad": v_cant, "unidad": v_uni, 
+                                            "costo": costo_linea, "insumo_id": d_ins['id']
+                                        })
+                                        st.rerun()
+
+                    with c_list:
+                        total_receta = sum([x['costo'] for x in st.session_state.var_ingredientes])
+                        st.markdown(f"**Costo Ingredientes:** ${total_receta:,.0f}")
+                        
+                        for i, item in enumerate(st.session_state.var_ingredientes):
+                            st.markdown(f"**• {item['cantidad']} {item['unidad']} {item['nombre']}** (${item['costo']:,.0f})")
+                            if st.button("🗑️", key=f"del_{i}"):
+                                st.session_state.var_ingredientes.pop(i)
+                                st.rerun()
+                        
+                        st.divider()
+                        margen = st.slider("Margen %", 10, 200, 50)
+                        precio_sug = total_receta / (1 - (margen/100)) if margen < 100 else total_receta * (1 + margen/100)
+                        st.caption(f"Sugerido: ${precio_sug:,.0f}")
+                        
+                        precio_final = st.number_input("Precio Venta Final ($)", value=int(precio_sug), step=500)
+                        
+                        if st.button("💾 Guardar Receta", type="primary", use_container_width=True):
+                            if st.session_state.var_ingredientes and var_sabor:
+                                try:
+                                    supabase.table('variaciones').insert({
+                                        "producto_id": id_padre, "nombre": nombre_completo,
+                                        "precio": precio_final, "ingredientes_json": json.dumps(st.session_state.var_ingredientes),
+                                        "rendimiento": rendimiento_final
+                                    }).execute()
+                                    st.success(f"¡Guardado!")
+                                    st.session_state.var_ingredientes = []
+                                    time.sleep(1.5)
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error: {e}")
+
+        # ---------------------------------------------------------
+        # TAB 1: CATÁLOGO (IMAGEN MÁS GRANDE 📸)
+        # ---------------------------------------------------------
+        with tab_catalogo:
+            st.subheader("Catálogo")
+            if lista_productos_base:
+                try: all_vars = supabase.table('variaciones').select("*").order('nombre').execute().data
+                except: all_vars = []
+                for p_nombre in lista_productos_base:
+                    p_data = mapa_productos_base[p_nombre]
+                    variaciones_p = [v for v in all_vars if v['producto_id'] == p_data['id']]
+                    
+                    with st.expander(f"🎂 {p_nombre} ({len(variaciones_p)} var)"):
+                        
+                        # CAMBIO: Aumenté la primera columna de 1 a 2 para darle más espacio a la foto
+                        col_img, col_info, col_actions = st.columns([2, 3, 1])
+                        
+                        with col_img:
+                            # Mostrar Imagen si existe
+                            if p_data.get('imagen_url'):
+                                # CAMBIO: width=300 (3x más grande que antes)
+                                st.image(p_data['imagen_url'], width=300)
+                            else:
+                                st.markdown("🖼️")
+                        
+                        with col_info:
+                            st.caption(f"Categoría: **{p_data.get('categoria', 'General')}**")
+                            # Listado de variaciones
+                            if not variaciones_p:
+                                st.info("Sin variedades.")
+                            else:
+                                for v in variaciones_p:
+                                    with st.container():
+                                        c_v1, c_v2 = st.columns([3, 1])
+                                        c_v1.markdown(f"**{v['nombre']}** - ${v['precio']:,.0f}")
+                                        
+                                        # Botones de Acción Variación
+                                        with c_v2:
+                                            if st.button("✏️", key=f"edit_{v['id']}", help="Editar Receta"):
+                                                st.session_state.edit_var_id = v['id']
+                                                st.session_state.edit_var_data = v
+                                                try: st.session_state.edit_ingredientes = json.loads(v['ingredientes_json'])
+                                                except: st.session_state.edit_ingredientes = []
+                                                st.toast("Cargado en 'Editor de Recetas' ➡️", icon="✏️")
+                                            
+                                            if st.button("🗑️", key=f"del_v_{v['id']}"):
+                                                supabase.table('variaciones').delete().eq('id', v['id']).execute()
+                                                st.rerun()
+                                        
+                                        with st.popover("Ver ingredientes"):
+                                            try:
+                                                ings = json.loads(v['ingredientes_json'])
+                                                for i in ings: 
+                                                    st.markdown(f"**• {i['cantidad']} {i['unidad']} {i['nombre']}**")
+                                            except: pass
+                                    st.divider()
+
+                        with col_actions:
+                            # POPOVER PARA EDITAR LA BASE (NOMBRE/FOTO)
+                            with st.popover("⚙️ Config Base"):
+                                st.markdown("##### Editar Producto Base")
+                                new_name_b = st.text_input("Nombre", p_data['nombre'], key=f"n_{p_data['id']}")
+                                new_cat_b = st.selectbox("Categoría", ["Tortas", "Cóctel", "Individuales", "Bollería"], index=0, key=f"c_{p_data['id']}")
+                                new_img_b = st.text_input("URL Imagen", p_data.get('imagen_url', ''), key=f"i_{p_data['id']}")
+                                
+                                if st.button("Guardar Cambios Base", key=f"save_b_{p_data['id']}"):
+                                    supabase.table('productos').update({
+                                        "nombre": new_name_b,
+                                        "categoria": new_cat_b,
+                                        "imagen_url": new_img_b
+                                    }).eq('id', p_data['id']).execute()
+                                    st.success("Actualizado")
+                                    time.sleep(1)
+                                    st.rerun()
+
+                            # Botón Borrar Base (Existente)
+                            if st.button("🗑️ Borrar Todo", key=f"del_b_{p_data['id']}", help="Borra la base y todas sus variaciones"):
+                                supabase.table('productos').delete().eq('id', p_data['id']).execute()
+                                st.rerun()
+            else:
+                st.info("Crea una masa base primero.")
 
     # ==========================================
-    # ⚙️ CONFIGURACIÓN
+    # 📦 INVENTARIO V7 (CON CALCULADORA DE FORMATOS)
+    # ==========================================
+    elif menu == "📦 Inventario":
+        st.title("📦 Inventario y Costos")
+
+        # --- HELPER CONVERSIÓN ---
+        def normalizar_cantidad(cantidad, unidad_origen, unidad_destino):
+            if unidad_origen == unidad_destino: return cantidad
+            if unidad_destino == 'kg' and unidad_origen == 'gr': return cantidad / 1000
+            if unidad_destino == 'gr' and unidad_origen == 'kg': return cantidad * 1000
+            if unidad_destino == 'lt' and (unidad_origen == 'ml' or unidad_origen == 'cc'): return cantidad / 1000
+            if (unidad_destino == 'ml' or unidad_destino == 'cc') and unidad_origen == 'lt': return cantidad * 1000
+            return None 
+
+        # Carga de datos
+        insumos_existentes = []
+        mapa_insumos = {}
+        if supabase:
+            try:
+                data = supabase.table('insumos').select("*").order('nombre').execute().data
+                insumos_existentes = [i['nombre'] for i in data]
+                mapa_insumos = {i['nombre']: i for i in data}
+            except Exception as e:
+                st.error(f"Error cargando inventario: {e}")
+
+        # TABS
+        tab_compra, tab_nuevo, tab_precios, tab_stock = st.tabs([
+            "🛒 Registrar Compra", 
+            "✨ Crear Nuevo Insumo", 
+            "💲 Actualizar Precios Mercado", 
+            "📋 Ver Stock"
+        ])
+
+        # ---------------------------------------------------------
+        # TAB 2: CREAR NUEVO INSUMO (CON FORMATO INICIAL)
+        # ---------------------------------------------------------
+        with tab_nuevo:
+            st.subheader("Definir Nuevo Insumo")
+            st.info("Define el producto y su formato de compra habitual.")
+            
+            c_nom, c_uni = st.columns([2, 1])
+            new_nombre = c_nom.text_input("Nombre Genérico", placeholder="Ej: Leche Condensada (sin marca ni peso)")
+            new_unidad = c_uni.selectbox("Unidad Base del Sistema", ["kg", "gr", "lt", "ml", "unidades"], help="¿Cómo quieres medir esto en tus recetas?")
+
+            st.markdown("##### 🏷️ Precio de Referencia Inicial")
+            c_form1, c_form2, c_form3 = st.columns(3)
+            
+            cant_ref = c_form1.number_input("¿Cuánto trae el envase?", min_value=0.1, help="Ej: 397 si es un tarro")
+            
+            opts = [new_unidad]
+            if new_unidad == 'kg': opts = ['kg', 'gr']
+            elif new_unidad == 'gr': opts = ['gr', 'kg']
+            elif new_unidad == 'lt': opts = ['lt', 'ml', 'cc']
+            elif new_unidad == 'ml': opts = ['ml', 'lt']
+            
+            uni_ref = c_form2.selectbox("Unidad del envase", opts)
+            precio_ref = c_form3.number_input("Precio del envase ($)", min_value=0)
+            
+            if st.button("💾 Crear Ficha"):
+                if new_nombre:
+                    # Calcular precio base normalizado
+                    cant_norm = normalizar_cantidad(cant_ref, uni_ref, new_unidad)
+                    if cant_norm and cant_norm > 0:
+                        costo_base_calc = precio_ref / cant_norm
+                        
+                        try:
+                            supabase.table('insumos').insert({
+                                "nombre": new_nombre, 
+                                "unidad_medida": new_unidad, 
+                                "stock_actual": 0, 
+                                "costo_unitario": costo_base_calc
+                            }).execute()
+                            st.success(f"Creado: {new_nombre}. Costo calculado: ${costo_base_calc:,.2f} por {new_unidad}")
+                            time.sleep(1.5)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+                    else:
+                        st.error("Error en la conversión de unidades.")
+
+        # ---------------------------------------------------------
+        # TAB 3: ACTUALIZAR PRECIOS (CALCULADORA DE FORMATOS)
+        # ---------------------------------------------------------
+        with tab_precios:
+            st.subheader("💲 Actualizador Inteligente de Precios")
+            st.markdown("Usa esta herramienta para pasar los precios de tu cuaderno al sistema sin usar calculadora.")
+            
+            if insumos_existentes:
+                col_sel, col_calc = st.columns([1, 2])
+                
+                with col_sel:
+                    insumo_upd = st.selectbox("Selecciona Producto", insumos_existentes, index=None)
+                    if insumo_upd:
+                        d = mapa_insumos[insumo_upd]
+                        st.info(f"Unidad Sistema: **{d['unidad_medida']}**")
+                        st.write(f"Precio actual: **${d['costo_unitario']:,.2f}** por {d['unidad_medida']}")
+                
+                with col_calc:
+                    if insumo_upd:
+                        st.markdown(f"##### 🧮 Ingresa datos del envase de {insumo_upd}")
+                        c_p1, c_p2, c_p3 = st.columns(3)
+                        
+                        cant_envase = c_p1.number_input("Contenido del Envase", min_value=0.1, help="Ej: 397 para lechera, 1 para kilo de harina")
+                        
+                        # Opciones compatibles
+                        u_base = mapa_insumos[insumo_upd]['unidad_medida']
+                        opts_p = [u_base]
+                        if u_base == 'kg': opts_p = ['kg', 'gr']
+                        elif u_base == 'gr': opts_p = ['gr', 'kg']
+                        elif u_base == 'lt': opts_p = ['lt', 'ml', 'cc']
+                        elif u_base == 'ml': opts_p = ['ml', 'lt']
+                        
+                        uni_envase = c_p2.selectbox("Unidad Envase", opts_p)
+                        precio_envase = c_p3.number_input("Precio del Envase ($)", min_value=0)
+                        
+                        # Preview Cálculo
+                        cant_norm_p = normalizar_cantidad(cant_envase, uni_envase, u_base)
+                        if cant_norm_p and cant_norm_p > 0 and precio_envase > 0:
+                            nuevo_costo_base = precio_envase / cant_norm_p
+                            st.success(f"💡 El sistema guardará que el **{u_base}** vale **${nuevo_costo_base:,.2f}**")
+                            
+                            if st.button("💾 Actualizar Precio Base", type="primary"):
+                                supabase.table('insumos').update({"costo_unitario": nuevo_costo_base}).eq('id', mapa_insumos[insumo_upd]['id']).execute()
+                                st.toast("Precio actualizado correctamente")
+                                time.sleep(1)
+                                st.rerun()
+
+                st.divider()
+                st.subheader("📋 Lista de Precios Actuales (Referencia)")
+                
+                # Tabla de solo lectura para ver resultados
+                df_view = pd.DataFrame(list(mapa_insumos.values()))
+                if not df_view.empty:
+                    st.dataframe(
+                        df_view[['nombre', 'unidad_medida', 'costo_unitario']], 
+                        use_container_width=True,
+                        column_config={
+                            "costo_unitario": st.column_config.NumberColumn("Precio Base ($)", format="$%.2f")
+                        }
+                    )
+
+        # ---------------------------------------------------------
+        # TAB 1: REGISTRAR COMPRA (STOCK)
+        # ---------------------------------------------------------
+        with tab_compra:
+            st.subheader("Ingreso de Stock Real")
+            
+            if not insumos_existentes:
+                st.warning("Crea insumos primero.")
+            else:
+                c_sel, c_info = st.columns([2, 2])
+                with c_sel:
+                    insumo_selec = st.selectbox("Producto Comprado", insumos_existentes, index=None, placeholder="Buscar...")
+                
+                if insumo_selec:
+                    datos = mapa_insumos[insumo_selec]
+                    u_base = datos['unidad_medida']
+                    
+                    with c_info:
+                        st.info(f"Precio Ref: **${datos['costo_unitario']:,.0f} / {u_base}**")
+
+                    c1, c2, c3 = st.columns(3)
+                    cant_input = c1.number_input("Cantidad", min_value=0.1, format="%.2f")
+                    
+                    opts = [u_base]
+                    if u_base == 'kg': opts = ['kg', 'gr']
+                    elif u_base == 'gr': opts = ['gr', 'kg']
+                    elif u_base == 'lt': opts = ['lt', 'ml', 'cc']
+                    elif u_base == 'ml': opts = ['ml', 'lt']
+                    
+                    u_compra = c2.selectbox("Unidad", opts)
+                    total_pago = c3.number_input("Total Pagado ($)", min_value=0)
+
+                    if st.button("✅ Ingresar Stock"):
+                        cant_norm = normalizar_cantidad(cant_input, u_compra, u_base)
+                        if cant_norm:
+                            # Calculamos nuevo precio ponderado o actualizamos al nuevo precio de mercado?
+                            # Estrategia: Actualizamos el precio de referencia al de la última compra
+                            nuevo_precio_ref = total_pago / cant_norm if cant_norm > 0 else datos['costo_unitario']
+                            
+                            supabase.table('insumos').update({
+                                "stock_actual": datos['stock_actual'] + cant_norm,
+                                "costo_unitario": nuevo_precio_ref
+                            }).eq('id', datos['id']).execute()
+                            
+                            registrar_gasto(total_pago, f"Compra: {insumo_selec}")
+                            st.toast("Stock ingresado y precio actualizado.")
+                            time.sleep(1)
+                            st.rerun()
+
+        # ---------------------------------------------------------
+        # TAB 4: VER STOCK (SOLO LECTURA Y BORRADO)
+        # ---------------------------------------------------------
+        with tab_stock:
+            st.subheader("Control de Bodega")
+            if insumos_existentes:
+                df = pd.DataFrame(list(mapa_insumos.values()))
+                st.dataframe(df[['nombre', 'stock_actual', 'unidad_medida', 'costo_unitario']], use_container_width=True)
+                
+                st.divider()
+                col_del, _ = st.columns(2)
+                with col_del:
+                    to_del = st.selectbox("Eliminar Insumo", insumos_existentes, index=None, placeholder="Selecciona para borrar...")
+                    if to_del:
+                        if st.button(f"🗑️ Borrar {to_del} permanentemente"):
+                            supabase.table('insumos').delete().eq('nombre', to_del).execute()
+                            st.rerun()
+                            
+    # ==========================================
+    # ⚙️ CONFIGURACIÓN (V3: CORRECCIÓN DE TABLA 'GASTOS')
     # ==========================================
     elif menu == "⚙️ Configuración":
-        st.title("Configuración del Sistema")
-        st.text_input("Nombre de la Empresa", value="TV Repostería")
-        st.write("Versión del Sistema: 6.1 Full Stack con Login")
+        st.title("⚙️ Configuración del Sistema")
+        st.info(f"Usuario: {st.session_state.usuario_actual} | Rol: {st.session_state.rol_actual}")
         
         st.divider()
-        st.subheader("Gestión de Usuarios")
-        
+        st.subheader("👥 Usuarios")
         if supabase:
-            usuarios = supabase.table('usuarios').select("*").execute().data
-            if usuarios:
-                df_usuarios = pd.DataFrame(usuarios)
-                st.dataframe(df_usuarios[['nombre', 'username', 'rol']], hide_index=True)
+            try:
+                usuarios = supabase.table('usuarios').select("*").execute().data
+                if usuarios: st.dataframe(pd.DataFrame(usuarios)[['nombre', 'username', 'rol']], hide_index=True, use_container_width=True)
+            except: pass
+
+        st.divider()
+        
+        # --- ZONA DE PELIGRO ---
+        st.subheader("🚨 Zona de Mantenimiento")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            with st.expander("🗑️ Borrar Inventario Físico"):
+                st.warning("Borra todos los insumos y stock.")
+                if st.checkbox("Confirmar borrado inventario", key="chk_inv_del"):
+                    if st.button("💣 EJECUTAR BORRADO INV"):
+                        supabase.table('insumos').delete().neq('id', 0).execute()
+                        st.success("Inventario Reiniciado")
+                        time.sleep(2)
+                        st.rerun()
+
+        with c2:
+            with st.expander("💰 Borrar Historial Financiero"):
+                st.warning("Borra el historial de ventas y gastos. Dashboard a $0.")
+                if st.checkbox("Confirmar borrado financiero", key="chk_fin_del"):
+                    if st.button("💣 EJECUTAR BORRADO FINANZAS"):
+                        try:
+                            # CORRECCIÓN AQUÍ: 'gastos' en lugar de 'transacciones'
+                            supabase.table('gastos').delete().neq('id', 0).execute()
+                            st.success("Historial Financiero Reiniciado")
+                            time.sleep(2)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
 
 # --- ARRANQUE ---
 if not st.session_state.authenticated:
