@@ -484,7 +484,7 @@ def main_app():
                         st.divider()
 
     # ==========================================
-    # 🧁 PRODUCTOS Y VARIACIONES (V11: EDITOR DE RENDIMIENTO Y COSTOS)
+    # 🧁 PRODUCTOS Y VARIACIONES (V11: DECIMALES LIMPIOS)
     # ==========================================
     elif menu == "🧁 Mis Productos":
         st.title("🧁 Catálogo Maestro")
@@ -493,8 +493,8 @@ def main_app():
         # --- HELPER: Conversión para Recetas ---
         def convertir_a_base(cantidad, unidad_receta, unidad_inventario):
             if unidad_receta == unidad_inventario: return cantidad
-            factor_cdta = 5   # 1 cdta = 5 gr/ml
-            factor_cda = 15   # 1 cda  = 15 gr/ml
+            factor_cdta = 5
+            factor_cda = 15
 
             if unidad_inventario == 'kg':
                 if unidad_receta == 'gr': return cantidad / 1000
@@ -517,7 +517,6 @@ def main_app():
                 if unidad_receta == 'cda': return cantidad * factor_cda
             return 0 
 
-        # --- HELPER: CALCULADORA DE PRECIO CASCADA ---
         def calcular_precio_final(costo_insumos, p_merma, p_ops, costo_mo, p_maq, p_margen, costo_empaque):
             val_merma = costo_insumos * (p_merma / 100)
             sub1 = costo_insumos + val_merma
@@ -529,7 +528,15 @@ def main_app():
             val_ganancia = sub4 * (p_margen / 100)
             sub5 = sub4 + val_ganancia
             final = sub5 + costo_empaque
-            return final, {"insumos": costo_insumos, "merma": val_merma, "ops": val_ops, "mo": costo_mo, "maq": val_maq, "ganancia": val_ganancia, "empaque": costo_empaque}
+            
+            return final, {
+                "insumos": costo_insumos, "merma": val_merma, "ops": val_ops,
+                "mo": costo_mo, "maq": val_maq, "ganancia": val_ganancia, "empaque": costo_empaque
+            }
+        
+        def mostrar_cantidad(valor):
+            if valor == int(valor): return str(int(valor))
+            return f"{valor:.2f}".rstrip('0').rstrip('.')
 
         # Cargar Datos
         mapa_insumos = {}
@@ -540,21 +547,15 @@ def main_app():
             try:
                 data_i = supabase.table('insumos').select("*").order('nombre').execute().data
                 mapa_insumos = {i['nombre']: i for i in data_i}
-                
                 data_p = supabase.table('productos').select("*").order('nombre').execute().data
                 lista_productos_base = [p['nombre'] for p in data_p]
                 mapa_productos_base = {p['nombre']: p for p in data_p}
             except: pass
         
-        # TABS
         tab_catalogo, tab_base, tab_variacion, tab_editor = st.tabs(["📖 Ver Catálogo", "✨ 1. Crear Masa Base", "🍰 2. Crear Variación", "✏️ Editor de Recetas"])
         
-        # ---------------------------------------------------------
-        # TAB 4: EDITOR DE RECETAS (CORREGIDO CON RENDIMIENTO)
-        # ---------------------------------------------------------
         with tab_editor:
             st.subheader("✏️ Editor de Recetas")
-            
             if 'edit_var_id' not in st.session_state: st.session_state.edit_var_id = None
                 
             if st.session_state.edit_var_id is None:
@@ -563,7 +564,7 @@ def main_app():
                 var_data = st.session_state.edit_var_data
                 st.markdown(f"Editando: **{var_data['nombre']}**")
                 
-                col_e1, col_e2 = st.columns([1, 1.2]) 
+                col_e1, col_e2 = st.columns([1, 1.2])
                 
                 with col_e1:
                     st.markdown("##### 🥣 Ingredientes")
@@ -572,14 +573,13 @@ def main_app():
                         d_ins = mapa_insumos[insumo_k]
                         u_base = d_ins['unidad_medida']
                         cc1, cc2 = st.columns(2)
-                        v_cant = cc1.number_input("Cant.", 0.0, format="%.2f", key="edit_cant")
+                        v_cant = cc1.number_input("Cant.", min_value=0.0, value=1.0, format="%.2f", step=0.1, key="edit_cant")
                         
                         opts = [u_base]
                         if u_base == 'kg': opts = ['gr', 'kg', 'cdta', 'cda']
                         elif u_base == 'gr': opts = ['gr', 'kg', 'cdta', 'cda']
                         elif u_base == 'lt': opts = ['ml', 'lt', 'cc', 'cdta', 'cda']
                         elif u_base in ['ml', 'cc']: opts = ['ml', 'lt', 'cc', 'cdta', 'cda']
-                        
                         v_uni = cc2.selectbox("Unidad", opts, key="edit_uni")
                         
                         if st.button("➕ Añadir", key="edit_add_btn"):
@@ -601,152 +601,117 @@ def main_app():
                             d_actual = mapa_insumos[ing['nombre']]
                             cant_norm = convertir_a_base(ing['cantidad'], ing['unidad'], d_actual['unidad_medida'])
                             costo_actual = cant_norm * d_actual['costo_unitario']
-                        
                         ing['costo'] = costo_actual
                         total_receta_edit += costo_actual
                         
                         c_txt, c_btn = st.columns([4, 1])
-                        c_txt.markdown(f"**• {ing['cantidad']} {ing['unidad']} {ing['nombre']}** (${costo_actual:,.0f})")
+                        cant_display = mostrar_cantidad(ing['cantidad'])
+                        c_txt.markdown(f"**• {cant_display} {ing['unidad']} {ing['nombre']}** (${costo_actual:,.0f})")
                         if c_btn.button("🗑️", key=f"del_edit_{idx}"):
                             st.session_state.edit_ingredientes.pop(idx)
                             st.rerun()
 
                 with col_e2:
                     st.markdown("##### 💰 Estructura de Costos")
-                    
-                    # --- CAMBIO AQUÍ: EDITOR DE RENDIMIENTO ---
-                    rendimiento_actual = var_data.get('rendimiento', 1)
-                    if rendimiento_actual is None: rendimiento_actual = 1
-                    
-                    new_rendimiento = st.number_input(
-                        "📦 Rendimiento (Unidades que salen)", 
-                        value=int(rendimiento_actual), 
-                        min_value=1,
-                        help="Corrige aquí: Pon 1 si es una torta entera. Pon 12 si son cupcakes."
-                    )
-                    # ------------------------------------------
-
-                    st.info(f"Costo Ingredientes Total: **${total_receta_edit:,.0f}**")
+                    st.info(f"Costo Ingredientes Base: **${total_receta_edit:,.0f}**")
                     
                     with st.expander("⚙️ Configuración Avanzada de Costos", expanded=True):
-                        c_p1, c_p2 = st.columns(2)
-                        p_merma = c_p1.slider("Merma %", 0, 15, 5, key="ed_merma")
-                        p_ops = c_p2.slider("G. Ops %", 0, 30, 15, key="ed_ops")
-                        
-                        c_p3, c_p4 = st.columns(2)
-                        costo_mo = c_p3.number_input("Mano Obra $", value=6400, step=1000, key="ed_mo")
-                        p_maq = c_p4.slider("Maquinaria %", 0, 20, 5, key="ed_maq")
-                        
+                        ep1, ep2 = st.columns(2)
+                        p_merma = ep1.slider("Merma (%)", 0, 15, 5, key="ed_merma")
+                        p_ops = ep2.slider("Gastos Ops (%)", 0, 30, 15, key="ed_ops")
+                        ep3, ep4 = st.columns(2)
+                        costo_mo = ep3.number_input("Mano de Obra ($)", value=6400, step=1000, key="ed_mo")
+                        p_maq = ep4.slider("Mantención Maq. (%)", 0, 20, 5, key="ed_maq")
                         st.divider()
-                        p_margen = st.slider("Margen Ganancia %", 10, 100, 60, key="ed_margen")
-                        costo_empaque = st.number_input("Empaque $", value=3000, step=500, key="ed_empaque")
+                        p_margen = st.slider("Margen Ganancia (%)", 10, 100, 60, key="ed_margen")
+                        costo_empaque = st.number_input("Costo Empaque ($)", value=3000, step=500, key="ed_empaque")
 
-                    # Calcular precio
-                    precio_sug_edit, bd = calcular_precio_final(
+                    precio_sug_edit, breakdown = calcular_precio_final(
                         total_receta_edit, p_merma, p_ops, costo_mo, p_maq, p_margen, costo_empaque
                     )
                     
-                    # Ajustar si el rendimiento es mayor a 1 (Precio unitario)
-                    precio_final_unitario_sug = precio_sug_edit / new_rendimiento
-                    
                     st.markdown("---")
-                    if new_rendimiento > 1:
-                        st.markdown(f"**Costo Total Lote:** ${precio_sug_edit:,.0f}")
-                        st.markdown(f"**Costo Unitario Sugerido:** ${precio_final_unitario_sug:,.0f}")
-                    else:
-                        st.markdown(f"**Precio Sugerido:** ${precio_sug_edit:,.0f}")
-
-                    st.markdown(f"""
-                    <div style="font-size: 13px; color: #666;">
-                        Desglose: Insumos+Merma: ${bd['insumos']+bd['merma']:,.0f} | 
-                        Ganancia: <span style="color:green">${bd['ganancia']:,.0f}</span>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown(f"""<div style="font-size: 14px;">
+                        <b>Subtotal 1</b>: ${breakdown['insumos'] + breakdown['merma']:,.0f}<br>
+                        + Ops: ${breakdown['ops']:,.0f} | MO: ${breakdown['mo']:,.0f} | Maq: ${breakdown['maq']:,.0f}<br>
+                        <b>Costo Total: ${(precio_sug_edit - breakdown['ganancia'] - breakdown['empaque']):,.0f}</b><br>
+                        <span style="color:green">+ Ganancia: ${breakdown['ganancia']:,.0f}</span> | Empaque: ${breakdown['empaque']:,.0f}
+                    </div>""", unsafe_allow_html=True)
                     
-                    precio_final_edit = st.number_input("Precio Venta Final ($)", value=int(var_data['precio']), step=500, key="edit_precio_f")
+                    st.markdown(f"#### Precio Sugerido: ${precio_sug_edit:,.0f}")
+                    precio_final_edit = st.number_input("Precio Venta Final ($)", value=int(precio_sug_edit), step=500, key="edit_precio_f")
                     
                     if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
                         try:
                             supabase.table('variaciones').update({
                                 "precio": precio_final_edit,
-                                "ingredientes_json": json.dumps(st.session_state.edit_ingredientes),
-                                "rendimiento": new_rendimiento # ACTUALIZAMOS EL RENDIMIENTO
+                                "ingredientes_json": json.dumps(st.session_state.edit_ingredientes)
                             }).eq('id', st.session_state.edit_var_id).execute()
-                            
-                            # Actualizamos la sesión local para que se refleje de inmediato
-                            st.session_state.edit_var_data['rendimiento'] = new_rendimiento
-                            st.session_state.edit_var_data['precio'] = precio_final_edit
-                            
-                            st.success("¡Receta y Rendimiento actualizados!")
+                            st.success("¡Actualizado!")
+                            st.session_state.edit_var_id = None
                             time.sleep(1.5)
                             st.rerun()
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+                        except Exception as e: st.error(f"Error: {e}")
                     
-                    if st.button("Salir del Editor"):
+                    if st.button("Cancelar"):
                         st.session_state.edit_var_id = None
                         st.rerun()
 
-        # ---------------------------------------------------------
-        # TAB 2: CREAR PRODUCTO BASE
-        # ---------------------------------------------------------
         with tab_base:
             st.subheader("Paso 1: Definir Tipo de Masa")
             c1, c2 = st.columns([2, 1])
-            pb_nombre = c1.text_input("Nombre de la Base", placeholder="Ej: Torta Bizcocho Tradicional")
+            pb_nombre = c1.text_input("Nombre de la Base", placeholder="Ej: Torta Bizcocho")
             pb_cat = c2.selectbox("Categoría", ["Tortas", "Cóctel", "Individuales", "Bollería"])
-            pb_img = c1.text_input("URL Imagen Referencial", placeholder="http://...")
+            pb_img = c1.text_input("URL Imagen", placeholder="http://...")
             
             if st.button("💾 Guardar Base"):
                 if pb_nombre:
                     try:
                         exist = supabase.table('productos').select('id').eq('nombre', pb_nombre).execute().data
-                        if exist:
-                            st.warning("¡Esa base ya existe!")
+                        if exist: st.warning("¡Ya existe!")
                         else:
-                            supabase.table('productos').insert({
-                                "nombre": pb_nombre, "categoria": pb_cat, "imagen_url": pb_img
-                            }).execute()
+                            supabase.table('productos').insert({"nombre": pb_nombre, "categoria": pb_cat, "imagen_url": pb_img}).execute()
                             st.success(f"Creado: {pb_nombre}")
                             time.sleep(1.5)
                             st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+                    except Exception as e: st.error(f"Error: {e}")
 
-        # ---------------------------------------------------------
-        # TAB 3: CREAR VARIACIÓN
-        # ---------------------------------------------------------
         with tab_variacion:
             st.subheader("Paso 2: Receta Específica")
-            
             if not lista_productos_base:
                 st.warning("Primero crea una Base en la pestaña anterior.")
             else:
                 sel_padre = st.selectbox("1. Selecciona el Tipo de Masa", lista_productos_base)
-                
                 if sel_padre:
                     id_padre = mapa_productos_base[sel_padre]['id']
                     st.divider()
                     
                     col_sabor, col_tam = st.columns([2, 1])
-                    with col_sabor: var_sabor = st.text_input("2. Sabor / Variedad", placeholder="Ej: Manjar Nuez")
+                    with col_sabor: 
+                        var_sabor = st.text_input("2. Sabor / Variedad", placeholder="Ej: Tradicional, Nueces")
                     with col_tam:
-                        opciones_tamano = ["12 Personas", "15 Personas", "20 Personas", "30 Personas", "40 Personas", "60 Personas", "Bandeja 12 Unid", "Individual"]
+                        opciones_tamano = ["1 Kilo", "500 Gramos", "12 Personas", "20 Personas", "30 Personas", "Bandeja 12 Unid", "Individual"]
                         var_tamano = st.selectbox("3. Tamaño", opciones_tamano)
-                        
-                        val_rendimiento = 1
-                        if "Bandeja 12" in var_tamano: val_rendimiento = 12
-                        elif "Individual" in var_tamano: val_rendimiento = 1
-                        rendimiento_final = st.number_input("Rendimiento (Unidades que salen)", value=val_rendimiento, min_value=1)
 
                     nombre_completo = f"{var_sabor} - {var_tamano}" if var_sabor else var_tamano
                     st.info(f"📝 Creando: **{nombre_completo}**")
 
-                    col_izq, col_der = st.columns([1, 1.2]) 
+                    # === 🎛️ CALCULADORA DE LOTE (PAN DE PASCUA) ===
+                    st.markdown("##### 🎛️ Configuración de Lote")
+                    usar_lote = st.checkbox("¿Es receta por lote? (Ej: Una mezcla rinde para varios panes)", value=False)
                     
+                    factor_div = 1.0
+                    if usar_lote:
+                        factor_div = st.number_input("Rendimiento del Lote (¿Cuántas unidades salen?)", min_value=1.0, value=10.0)
+                        st.info(f"💡 Ingresa la receta de la 'Olla Completa'. El sistema dividirá los ingredientes por {factor_div} para sacar el costo unitario.")
+
+                    col_izq, col_der = st.columns([1, 1.2])
+                    
+                    # --- IZQUIERDA: INGREDIENTES ---
                     with col_izq:
                         st.markdown("##### 🥣 Ingredientes")
-                        if 'var_ingredientes' not in st.session_state: st.session_state.var_ingredientes = []
+                        if 'var_ingredientes' not in st.session_state: 
+                            st.session_state.var_ingredientes = []
                         
                         insumo_k = st.selectbox("Insumo", list(mapa_insumos.keys()), index=None, placeholder="Buscar...")
                         if insumo_k:
@@ -755,7 +720,8 @@ def main_app():
                             st.caption(f"Costo: ${d_ins['costo_unitario']:,.0f} / {u_base}")
                             
                             cc1, cc2 = st.columns(2)
-                            v_cant = cc1.number_input("Cant.", 0.0, format="%.2f")
+                            label_cant = "Cantidad LOTE" if usar_lote else "Cantidad UNIDAD"
+                            v_cant = cc1.number_input(label_cant, min_value=0.0, value=1.0, format="%.2f", step=0.1)
                             
                             opts = [u_base]
                             if u_base == 'kg': opts = ['gr', 'kg', 'cdta', 'cda']
@@ -767,25 +733,78 @@ def main_app():
                             
                             if st.button("⬇️ Agregar"):
                                 if v_cant > 0:
-                                    cant_norm = convertir_a_base(v_cant, v_uni, u_base)
-                                    costo_linea = cant_norm * d_ins['costo_unitario']
+                                    # 1. Normalizar a unidad base del sistema
+                                    cant_norm_sistema = convertir_a_base(v_cant, v_uni, u_base)
+                                    
+                                    # 2. Calcular costo (SIEMPRE con la cantidad normalizada completa)
+                                    costo_linea = cant_norm_sistema * d_ins['costo_unitario']
+                                    
+                                    # 3. GUARDAR la cantidad original ingresada (NO dividir aquí)
                                     st.session_state.var_ingredientes.append({
-                                        "nombre": insumo_k, "cantidad": v_cant, "unidad": v_uni, 
-                                        "costo": costo_linea, "insumo_id": d_ins['id']
+                                        "nombre": insumo_k, 
+                                        "cantidad": v_cant,  # ✅ Guardamos lo que ingresó el usuario
+                                        "unidad": v_uni,      # ✅ En la unidad que eligió
+                                        "costo": costo_linea, # ✅ Costo total de esa cantidad
+                                        "insumo_id": d_ins['id']
                                     })
                                     st.rerun()
                         
                         st.markdown("---")
-                        total_receta = sum([x['costo'] for x in st.session_state.var_ingredientes])
+                        
+                        # Calcular costo total según el modo
+                        total_receta = 0
+                        
+                        if usar_lote:
+                            st.caption(f"💡 Ficha Técnica del Lote Completo ({int(factor_div)} unidades):")
+                        else:
+                            st.caption(f"Ficha Técnica ({var_tamano}):")
+                        
                         for i, item in enumerate(st.session_state.var_ingredientes):
-                            st.markdown(f"**• {item['cantidad']} {item['unidad']} {item['nombre']}** (${item['costo']:,.0f})")
+                            # Recalcular costo actualizado por si cambió el precio del insumo
+                            if item['nombre'] in mapa_insumos:
+                                d_actual = mapa_insumos[item['nombre']]
+                                cant_norm = convertir_a_base(item['cantidad'], item['unidad'], d_actual['unidad_medida'])
+                                costo_actual = cant_norm * d_actual['costo_unitario']
+                                item['costo'] = costo_actual
+                            
+                            total_receta += item['costo']
+                            
+                            # Mostrar ingrediente
+                            cant_display = mostrar_cantidad(item['cantidad'])
+                            st.markdown(f"**• {cant_display} {item['unidad']} {item['nombre']}** (${item['costo']:,.0f})")
+                            
                             if st.button("🗑️", key=f"del_{i}"):
                                 st.session_state.var_ingredientes.pop(i)
                                 st.rerun()
+                        
+                        # Mostrar resumen según modo
+                        if usar_lote and total_receta > 0:
+                            costo_unitario = total_receta / factor_div
+                            st.markdown(f"""
+                            <div style="background:#e3f2fd; padding:8px; border-radius:5px; margin-top:10px;">
+                                <b>Resumen:</b><br>
+                                • Costo Lote Completo: ${total_receta:,.0f}<br>
+                                • Costo por Unidad: ${costo_unitario:,.0f}
+                            </div>
+                            """, unsafe_allow_html=True)
 
+                    # --- DERECHA: CALCULADORA COSTOS ---
+                    # --- DERECHA: CALCULADORA COSTOS ---
+                    # --- DERECHA: CALCULADORA COSTOS ---
                     with col_der:
                         st.markdown("##### 💰 Calculadora de Precios")
-                        st.info(f"Costo Ingredientes: **${total_receta:,.0f}**")
+                        
+                        # Calcular costo total de los ingredientes (del LOTE COMPLETO si aplica)
+                        total_ingredientes_lote = sum([x['costo'] for x in st.session_state.var_ingredientes])
+                        
+                        # Si es modo lote, calcular el costo unitario de ingredientes
+                        if usar_lote and total_ingredientes_lote > 0:
+                            costo_ingredientes_unitario = total_ingredientes_lote / factor_div
+                            st.info(f"Costo Ingredientes por Unidad: **${costo_ingredientes_unitario:,.0f}**")
+                            st.caption(f"💡 Costo total de ingredientes del lote: ${total_ingredientes_lote:,.0f}")
+                        else:
+                            costo_ingredientes_unitario = total_ingredientes_lote
+                            st.info(f"Costo Ingredientes: **${costo_ingredientes_unitario:,.0f}**")
                         
                         with st.expander("⚙️ Opciones Avanzadas", expanded=True):
                             c_p1, c_p2 = st.columns(2)
@@ -793,43 +812,94 @@ def main_app():
                             p_ops = c_p2.slider("G. Ops %", 0, 30, 15)
                             
                             c_p3, c_p4 = st.columns(2)
-                            costo_mo = c_p3.number_input("Mano Obra $", value=6400, step=1000)
-                            p_maq = c_p4.slider("Maquinaria %", 0, 20, 5)
                             
+                            if usar_lote:
+                                costo_mo = c_p3.number_input("Mano Obra $ (TODO el lote)", value=6400, step=500)
+                                costo_empaque = c_p4.number_input("Empaque $ (TODO el lote)", value=0, step=500)
+                            else:
+                                costo_mo = c_p3.number_input("Mano Obra $ (por unidad)", value=6400, step=500)
+                                costo_empaque = c_p4.number_input("Empaque $ (por unidad)", value=3000, step=500)
+                            
+                            p_maq = st.slider("Mantención Maq. %", 0, 20, 5)
                             p_margen = st.slider("Margen Ganancia %", 10, 100, 60)
-                            costo_empaque = st.number_input("Empaque $", value=3000, step=500)
 
-                        precio_sug, bd = calcular_precio_final(total_receta, p_merma, p_ops, costo_mo, p_maq, p_margen, costo_empaque)
-                        
-                        st.markdown(f"""
-                        <div style="background:#f8f9fa; padding:10px; border-radius:5px; font-size:13px;">
-                            <b>Costo Prod. Total: ${(precio_sug - bd['ganancia'] - bd['empaque']):,.0f}</b><br>
-                            <span style="color:green">+ Ganancia: ${bd['ganancia']:,.0f}</span> | + Empaque: ${bd['empaque']:,.0f}
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        st.markdown(f"#### Sugerido: ${precio_sug:,.0f}")
-                        
-                        precio_final = st.number_input("Precio Venta Final ($)", value=int(precio_sug), step=500)
-                        
-                        if st.button("💾 Guardar Receta", type="primary", use_container_width=True):
-                            if st.session_state.var_ingredientes and var_sabor:
-                                try:
-                                    supabase.table('variaciones').insert({
-                                        "producto_id": id_padre, "nombre": nombre_completo,
-                                        "precio": precio_final, "ingredientes_json": json.dumps(st.session_state.var_ingredientes),
-                                        "rendimiento": rendimiento_final
-                                    }).execute()
-                                    st.success(f"¡Guardado!")
-                                    st.session_state.var_ingredientes = []
-                                    time.sleep(1.5)
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error: {e}")
+                        # SOLO calcular si hay ingredientes
+                        if total_ingredientes_lote > 0:
+                            st.markdown("---")
+                            
+                            if usar_lote:
+                                # MODO LOTE: Calcular sobre el lote completo
+                                val_merma = total_ingredientes_lote * (p_merma / 100)
+                                sub1 = total_ingredientes_lote + val_merma
+                                val_ops = sub1 * (p_ops / 100)
+                                sub2 = sub1 + val_ops
+                                sub3 = sub2 + costo_mo
+                                val_maq = sub3 * (p_maq / 100)
+                                sub4 = sub3 + val_maq
+                                costo_produccion_lote = sub4
+                                val_ganancia = costo_produccion_lote * (p_margen / 100)
+                                sub5 = costo_produccion_lote + val_ganancia
+                                precio_total_lote = sub5 + costo_empaque
+                                precio_unitario_sug = precio_total_lote / factor_div
+                                
+                                st.markdown(f"""
+                                <div style="background:#fff3cd; padding:12px; border-radius:8px; border-left:4px solid #ffc107; font-size:13px;">
+                                    <b>📦 Cálculo del Lote ({int(factor_div)} unidades):</b><br><br>
+                                    • Ingredientes: ${total_ingredientes_lote:,.0f}<br>
+                                    • Merma ({p_merma}%): ${val_merma:,.0f}<br>
+                                    • Gastos Ops ({p_ops}%): ${val_ops:,.0f}<br>
+                                    • Mano de Obra: ${costo_mo:,.0f}<br>
+                                    • Maquinaria ({p_maq}%): ${val_maq:,.0f}<br>
+                                    <b>= Costo Producción: ${costo_produccion_lote:,.0f}</b><br><br>
+                                    • Ganancia ({p_margen}%): <span style="color:green">${val_ganancia:,.0f}</span><br>
+                                    • Empaque: ${costo_empaque:,.0f}<br>
+                                    <b style="font-size:15px;">= Precio Total Lote: ${precio_total_lote:,.0f}</b><br><br>
+                                    <hr style="margin:8px 0; border:none; border-top:1px solid #ddd;">
+                                    <b style="font-size:16px; color:#f2590d;">🔹 Precio Unitario: ${precio_unitario_sug:,.0f}</b><br>
+                                    <small style="color:#666;">(${precio_total_lote:,.0f} ÷ {int(factor_div)} unidades)</small>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            else:
+                                # MODO NORMAL
+                                precio_unitario_sug, bd = calcular_precio_final(
+                                    costo_ingredientes_unitario, p_merma, p_ops, costo_mo, p_maq, p_margen, costo_empaque
+                                )
+                                st.markdown(f"""
+                                <div style="background:#f8f9fa; padding:10px; border-radius:5px; font-size:13px;">
+                                    <b>Desglose:</b><br>
+                                    Subtotal+Merma: ${bd['insumos']+bd['merma']:,.0f}<br>
+                                    + Ops: ${bd['ops']:,.0f} | MO: ${bd['mo']:,.0f} | Maq: ${bd['maq']:,.0f}<br>
+                                    <b>Costo Prod: ${(precio_unitario_sug - bd['ganancia'] - bd['empaque']):,.0f}</b><br>
+                                    <span style="color:green">+ Ganancia: ${bd['ganancia']:,.0f}</span> | Empaque: ${bd['empaque']:,.0f}
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            st.markdown(f"#### Precio Unitario Sugerido: ${precio_unitario_sug:,.0f}")
+                            precio_final = st.number_input("Precio Venta Final Unitario ($)", value=int(precio_unitario_sug), step=100)
+                            
+                            if st.button("💾 Guardar Receta", type="primary", use_container_width=True):
+                                if st.session_state.var_ingredientes and var_sabor:
+                                    try:
+                                        supabase.table('variaciones').insert({
+                                            "producto_id": id_padre, "nombre": nombre_completo,
+                                            "precio": precio_final, 
+                                            "ingredientes_json": json.dumps(st.session_state.var_ingredientes),
+                                            "rendimiento": factor_div
+                                        }).execute()
+                                        st.success(f"✅ Guardado! Precio unitario: ${precio_final:,.0f}")
+                                        if usar_lote:
+                                            st.info(f"💡 Lote completo: ${precio_final * factor_div:,.0f}")
+                                        st.session_state.var_ingredientes = []
+                                        time.sleep(1.5)
+                                        st.rerun()
+                                    except Exception as e: st.error(f"Error: {e}")
+                        else:
+                            st.markdown("---")
+                            st.warning("⚠️ Agrega ingredientes para calcular")
+                            
+                            # Botón deshabilitado visualmente
+                            st.markdown('<p style="color:#999; font-size:14px;">💾 Guardar Receta (Agrega ingredientes primero)</p>', unsafe_allow_html=True)
 
-        # ---------------------------------------------------------
-        # TAB 1: CATÁLOGO
-        # ---------------------------------------------------------
         with tab_catalogo:
             st.subheader("Catálogo")
             if lista_productos_base:
@@ -838,66 +908,50 @@ def main_app():
                 for p_nombre in lista_productos_base:
                     p_data = mapa_productos_base[p_nombre]
                     variaciones_p = [v for v in all_vars if v['producto_id'] == p_data['id']]
-                    
                     with st.expander(f"🎂 {p_nombre} ({len(variaciones_p)} var)"):
                         col_img, col_info, col_actions = st.columns([2, 3, 1])
-                        
                         with col_img:
-                            if p_data.get('imagen_url'):
-                                st.image(p_data['imagen_url'], width=300)
-                            else:
-                                st.markdown("🖼️")
-                        
+                            if p_data.get('imagen_url'): st.image(p_data['imagen_url'], width=300)
+                            else: st.markdown("🖼️")
                         with col_info:
                             st.caption(f"Categoría: **{p_data.get('categoria', 'General')}**")
-                            if not variaciones_p:
-                                st.info("Sin variedades.")
+                            if not variaciones_p: st.info("Sin variedades.")
                             else:
                                 for v in variaciones_p:
                                     with st.container():
                                         c_v1, c_v2 = st.columns([3, 1])
                                         c_v1.markdown(f"**{v['nombre']}** - ${v['precio']:,.0f}")
-                                        
                                         with c_v2:
-                                            if st.button("✏️", key=f"edit_{v['id']}", help="Editar Receta"):
+                                            if st.button("✏️", key=f"edit_{v['id']}"):
                                                 st.session_state.edit_var_id = v['id']
                                                 st.session_state.edit_var_data = v
                                                 try: st.session_state.edit_ingredientes = json.loads(v['ingredientes_json'])
                                                 except: st.session_state.edit_ingredientes = []
-                                                st.toast("Cargado en 'Editor de Recetas' ➡️", icon="✏️")
-                                            
+                                                st.toast("Cargado en Editor ➡️")
                                             if st.button("🗑️", key=f"del_v_{v['id']}"):
                                                 supabase.table('variaciones').delete().eq('id', v['id']).execute()
                                                 st.rerun()
-                                        
                                         with st.popover("Ver ingredientes"):
                                             try:
                                                 ings = json.loads(v['ingredientes_json'])
-                                                for i in ings: 
-                                                    st.markdown(f"**• {i['cantidad']} {i['unidad']} {i['nombre']}**")
+                                                for i in ings: st.markdown(f"**• {i['cantidad']} {i['unidad']} {i['nombre']}**")
                                             except: pass
                                     st.divider()
-
                         with col_actions:
-                            with st.popover("⚙️ Config Base"):
+                            with st.popover("⚙️ Config"):
                                 new_name_b = st.text_input("Nombre", p_data['nombre'], key=f"n_{p_data['id']}")
-                                new_cat_b = st.selectbox("Categoría", ["Tortas", "Cóctel", "Individuales", "Bollería"], index=0, key=f"c_{p_data['id']}")
-                                new_img_b = st.text_input("URL Imagen", p_data.get('imagen_url', ''), key=f"i_{p_data['id']}")
-                                
+                                new_cat_b = st.selectbox("Cat", ["Tortas", "Cóctel", "Individuales", "Bollería"], key=f"c_{p_data['id']}")
+                                new_img_b = st.text_input("URL", p_data.get('imagen_url', ''), key=f"i_{p_data['id']}")
                                 if st.button("Guardar", key=f"save_b_{p_data['id']}"):
-                                    supabase.table('productos').update({
-                                        "nombre": new_name_b, "categoria": new_cat_b, "imagen_url": new_img_b
-                                    }).eq('id', p_data['id']).execute()
+                                    supabase.table('productos').update({"nombre": new_name_b, "categoria": new_cat_b, "imagen_url": new_img_b}).eq('id', p_data['id']).execute()
                                     st.rerun()
-
-                            if st.button("🗑️ Borrar Todo", key=f"del_b_{p_data['id']}"):
+                            if st.button("🗑️ Borrar", key=f"del_b_{p_data['id']}"):
                                 supabase.table('productos').delete().eq('id', p_data['id']).execute()
                                 st.rerun()
-            else:
-                st.info("Crea una masa base primero.")
+            else: st.info("Crea una masa base primero.")
 
     # ==========================================
-    # 📦 INVENTARIO (V9: AGREGAR STOCK CON UNIDADES)
+    # 📦 INVENTARIO (V10: DECIMALES LIMPIOS)
     # ==========================================
     elif menu == "📦 Inventario":
         st.title("📦 Inventario y Costos")
@@ -909,7 +963,12 @@ def main_app():
             if unidad_destino == 'gr' and unidad_origen == 'kg': return cantidad * 1000
             if unidad_destino == 'lt' and (unidad_origen == 'ml' or unidad_origen == 'cc'): return cantidad / 1000
             if (unidad_destino == 'ml' or unidad_destino == 'cc') and unidad_origen == 'lt': return cantidad * 1000
-            return None 
+            return None
+        
+        def mostrar_cantidad(valor, unidad=None):
+            if unidad == 'unidades': return str(int(valor))
+            if valor == int(valor): return str(int(valor))
+            return f"{valor:.2f}".rstrip('0').rstrip('.')
 
         # Carga de datos
         insumos_existentes = []
@@ -955,16 +1014,20 @@ def main_app():
                     elif u_base == 'gr': opts = ['gr', 'kg']
                     elif u_base == 'lt': opts = ['lt', 'ml', 'cc']
                     elif u_base == 'ml': opts = ['ml', 'lt']
+                    elif u_base == 'unidades': opts = ['unidades']
                     
                     with c2:
                         u_compra = st.selectbox("Unidad Compra", opts, key="c_u")
                     with c1:
-                        cant_input = st.number_input("Cantidad", min_value=0.0001, format="%.4f", step=0.001, key="c_c")
+                        if u_compra == 'unidades':
+                            cant_input = st.number_input("Cantidad", min_value=0, value=1, step=1, key="c_c")
+                        else:
+                            cant_input = st.number_input("Cantidad", min_value=0.0, value=1.0, format="%.2f", step=0.1, key="c_c")
                     with c3:
-                        total_pago = st.number_input("Total Pagado ($)", min_value=0.0, step=100.0, key="c_p")
+                        total_pago = st.number_input("Total Pagado ($)", min_value=0, value=0, step=1000, key="c_p")
 
                     if st.button("✅ Ingresar Stock"):
-                        cant_norm = normalizar_cantidad(cant_input, u_compra, u_base)
+                        cant_norm = normalizar_cantidad(cant_input, u_compra, u_base) if u_compra != u_base else cant_input
                         if cant_norm:
                             nuevo_precio_ref = total_pago / cant_norm if cant_norm > 0 else datos['costo_unitario']
                             supabase.table('insumos').update({
@@ -973,7 +1036,7 @@ def main_app():
                             }).eq('id', datos['id']).execute()
                             
                             registrar_gasto(total_pago, f"Compra: {insumo_selec}")
-                            st.toast("Stock ingresado.")
+                            st.toast("✅ Stock ingresado.")
                             time.sleep(1)
                             st.rerun()
 
@@ -994,14 +1057,19 @@ def main_app():
             elif new_unidad == 'gr': opts = ['gr', 'kg']
             elif new_unidad == 'lt': opts = ['lt', 'ml', 'cc']
             elif new_unidad == 'ml': opts = ['ml', 'lt']
+            elif new_unidad == 'unidades': opts = ['unidades']
             
             with c_form2: uni_ref = st.selectbox("Unidad del envase", opts, key="n_u")
-            with c_form1: cant_ref = st.number_input("Contenido", min_value=0.0001, format="%.4f", step=0.001, key="n_c")
-            with c_form3: precio_ref = st.number_input("Precio ($)", min_value=0.0, step=100.0, key="n_p")
+            with c_form1: 
+                if uni_ref == 'unidades':
+                    cant_ref = st.number_input("Contenido", min_value=0, value=1, step=1, key="n_c")
+                else:
+                    cant_ref = st.number_input("Contenido", min_value=0.0, value=1.0, format="%.2f", step=0.1, key="n_c")
+            with c_form3: precio_ref = st.number_input("Precio ($)", min_value=0, value=0, step=1000, key="n_p")
             
             if st.button("💾 Crear Ficha"):
                 if new_nombre:
-                    cant_norm = normalizar_cantidad(cant_ref, uni_ref, new_unidad)
+                    cant_norm = normalizar_cantidad(cant_ref, uni_ref, new_unidad) if uni_ref != new_unidad else cant_ref
                     if cant_norm and cant_norm > 0:
                         costo_base_calc = precio_ref / cant_norm
                         try:
@@ -1011,7 +1079,7 @@ def main_app():
                                 "stock_actual": 0, 
                                 "costo_unitario": costo_base_calc
                             }).execute()
-                            st.success(f"Creado: {new_nombre}")
+                            st.success(f"✅ Creado: {new_nombre}")
                             time.sleep(1.5)
                             st.rerun()
                         except Exception as e: st.error(f"Error: {e}")
@@ -1040,12 +1108,17 @@ def main_app():
                         elif u_base == 'gr': opts_p = ['gr', 'kg']
                         elif u_base == 'lt': opts_p = ['lt', 'ml', 'cc']
                         elif u_base == 'ml': opts_p = ['ml', 'lt']
+                        elif u_base == 'unidades': opts_p = ['unidades']
                         
                         with c_p2: uni_envase = st.selectbox("Unidad", opts_p, key="p_u")
-                        with c_p1: cant_envase = st.number_input("Contenido", min_value=0.0001, format="%.4f", step=0.001, key="p_c")
-                        with c_p3: precio_envase = st.number_input("Precio Total ($)", min_value=0.0, step=100.0, key="p_p")
+                        with c_p1: 
+                            if uni_envase == 'unidades':
+                                cant_envase = st.number_input("Contenido", min_value=0, value=1, step=1, key="p_c")
+                            else:
+                                cant_envase = st.number_input("Contenido", min_value=0.0, value=1.0, format="%.2f", step=0.1, key="p_c")
+                        with c_p3: precio_envase = st.number_input("Precio Total ($)", min_value=0, value=0, step=1000, key="p_p")
                         
-                        cant_norm_p = normalizar_cantidad(cant_envase, uni_envase, u_base)
+                        cant_norm_p = normalizar_cantidad(cant_envase, uni_envase, u_base) if uni_envase != u_base else cant_envase
                         if cant_norm_p and cant_norm_p > 0 and precio_envase > 0:
                             nuevo_costo_base = precio_envase / cant_norm_p
                             if u_base == 'gr' and cant_envase < 1 and uni_envase == 'gr':
@@ -1061,16 +1134,15 @@ def main_app():
                     st.dataframe(df_view[['nombre', 'unidad_medida', 'costo_unitario']], use_container_width=True)
 
         # ---------------------------------------------------------
-        # TAB 4: VER Y AJUSTAR STOCK (NUEVO)
+        # TAB 4: VER Y AJUSTAR STOCK
         # ---------------------------------------------------------
         with tab_stock:
             st.subheader("Control de Bodega")
             
-            # --- SECCIÓN DE AJUSTE RÁPIDO ---
             with st.expander("➕ Agregar / Ajustar Stock Manualmente", expanded=True):
                 st.caption("Usa esto para agregar sobras (ej: 'me quedan 200gr') o corregir el inventario sin registrar gasto.")
                 
-                c_aj_1, c_aj_2, c_aj_3, c_aj_4 = st.columns([2, 1.5, 1, 1.5])
+                c_aj_1, c_aj_2 = st.columns([2, 2])
                 
                 with c_aj_1:
                     item_ajuste = st.selectbox("Producto", insumos_existentes, index=None, key="aj_item")
@@ -1080,23 +1152,27 @@ def main_app():
                     u_base = dat_aj['unidad_medida']
                     
                     with c_aj_2:
-                        tipo_ajuste = st.radio("Acción", ["➕ Sumar al stock", "📝 Fijar stock total"], horizontal=True, label_visibility="collapsed")
+                        tipo_ajuste = st.radio("Acción", ["➕ Sumar al stock", "📌 Fijar stock total"], horizontal=True, label_visibility="collapsed")
                     
-                    with c_aj_3:
-                        cant_ajuste = st.number_input("Cantidad", min_value=0.0001, format="%.4f", key="aj_cant")
+                    opts_aj = [u_base]
+                    if u_base == 'kg': opts_aj = ['kg', 'gr']
+                    elif u_base == 'gr': opts_aj = ['gr', 'kg']
+                    elif u_base == 'lt': opts_aj = ['lt', 'ml', 'cc']
+                    elif u_base == 'ml': opts_aj = ['ml', 'lt']
+                    elif u_base == 'unidades': opts_aj = ['unidades']
+                    
+                    c_aj_3, c_aj_4 = st.columns([1.5, 1.5])
                     
                     with c_aj_4:
-                        # Unidades flexibles
-                        opts_aj = [u_base]
-                        if u_base == 'kg': opts_aj = ['kg', 'gr']
-                        elif u_base == 'gr': opts_aj = ['gr', 'kg']
-                        elif u_base == 'lt': opts_aj = ['lt', 'ml', 'cc']
-                        elif u_base == 'ml': opts_aj = ['ml', 'lt']
-                        
                         uni_ajuste = st.selectbox("Unidad", opts_aj, key="aj_uni")
                     
-                    # Botón de acción
-                    cant_norm_aj = normalizar_cantidad(cant_ajuste, uni_ajuste, u_base)
+                    with c_aj_3:
+                        if uni_ajuste == 'unidades':
+                            cant_ajuste = st.number_input("Cantidad", min_value=0, value=1, step=1, key="aj_cant")
+                        else:
+                            cant_ajuste = st.number_input("Cantidad", min_value=0.0, value=1.0, format="%.2f", step=0.1, key="aj_cant")
+                    
+                    cant_norm_aj = normalizar_cantidad(cant_ajuste, uni_ajuste, u_base) if uni_ajuste != u_base else cant_ajuste
                     
                     if cant_norm_aj is not None:
                         nuevo_stock = 0
@@ -1104,20 +1180,21 @@ def main_app():
                         
                         if tipo_ajuste == "➕ Sumar al stock":
                             nuevo_stock = dat_aj['stock_actual'] + cant_norm_aj
-                            msg_accion = f"Sumados {cant_ajuste} {uni_ajuste}"
+                            msg_accion = f"Sumados {mostrar_cantidad(cant_ajuste, uni_ajuste)} {uni_ajuste}"
                         else:
                             nuevo_stock = cant_norm_aj
-                            msg_accion = f"Stock fijado en {cant_ajuste} {uni_ajuste}"
-                            
-                        if st.button(f"💾 Guardar: Stock quedará en {nuevo_stock:.3f} {u_base}", use_container_width=True):
+                            msg_accion = f"Stock fijado en {mostrar_cantidad(cant_ajuste, uni_ajuste)} {uni_ajuste}"
+                        
+                        stock_display = mostrar_cantidad(nuevo_stock, u_base)
+                        
+                        if st.button(f"💾 Guardar: Stock quedará en {stock_display} {u_base}", use_container_width=True):
                             supabase.table('insumos').update({"stock_actual": nuevo_stock}).eq('id', dat_aj['id']).execute()
-                            st.success(f"✅ {msg_accion}. Nuevo total: {nuevo_stock:.3f} {u_base}")
+                            st.success(f"✅ {msg_accion}. Nuevo total: {stock_display} {u_base}")
                             time.sleep(1.5)
                             st.rerun()
 
             st.divider()
             
-            # --- TABLA DE STOCK ---
             if insumos_existentes:
                 df = pd.DataFrame(list(mapa_insumos.values()))
                 st.dataframe(df[['nombre', 'stock_actual', 'unidad_medida', 'costo_unitario']], use_container_width=True)
