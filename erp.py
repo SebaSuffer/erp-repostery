@@ -909,7 +909,7 @@ def main_app():
                 st.info("Crea una masa base primero.")
 
     # ==========================================
-    # 📦 INVENTARIO V7 (CON CALCULADORA DE FORMATOS)
+    # 📦 INVENTARIO (V9: AGREGAR STOCK CON UNIDADES)
     # ==========================================
     elif menu == "📦 Inventario":
         st.title("📦 Inventario y Costos")
@@ -939,123 +939,14 @@ def main_app():
             "🛒 Registrar Compra", 
             "✨ Crear Nuevo Insumo", 
             "💲 Actualizar Precios Mercado", 
-            "📋 Ver Stock"
+            "📋 Ver y Ajustar Stock"
         ])
 
         # ---------------------------------------------------------
-        # TAB 2: CREAR NUEVO INSUMO (CON FORMATO INICIAL)
-        # ---------------------------------------------------------
-        with tab_nuevo:
-            st.subheader("Definir Nuevo Insumo")
-            st.info("Define el producto y su formato de compra habitual.")
-            
-            c_nom, c_uni = st.columns([2, 1])
-            new_nombre = c_nom.text_input("Nombre Genérico", placeholder="Ej: Leche Condensada (sin marca ni peso)")
-            new_unidad = c_uni.selectbox("Unidad Base del Sistema", ["kg", "gr", "lt", "ml", "unidades"], help="¿Cómo quieres medir esto en tus recetas?")
-
-            st.markdown("##### 🏷️ Precio de Referencia Inicial")
-            c_form1, c_form2, c_form3 = st.columns(3)
-            
-            cant_ref = c_form1.number_input("¿Cuánto trae el envase?", min_value=0.1, help="Ej: 397 si es un tarro")
-            
-            opts = [new_unidad]
-            if new_unidad == 'kg': opts = ['kg', 'gr']
-            elif new_unidad == 'gr': opts = ['gr', 'kg']
-            elif new_unidad == 'lt': opts = ['lt', 'ml', 'cc']
-            elif new_unidad == 'ml': opts = ['ml', 'lt']
-            
-            uni_ref = c_form2.selectbox("Unidad del envase", opts)
-            precio_ref = c_form3.number_input("Precio del envase ($)", min_value=0)
-            
-            if st.button("💾 Crear Ficha"):
-                if new_nombre:
-                    # Calcular precio base normalizado
-                    cant_norm = normalizar_cantidad(cant_ref, uni_ref, new_unidad)
-                    if cant_norm and cant_norm > 0:
-                        costo_base_calc = precio_ref / cant_norm
-                        
-                        try:
-                            supabase.table('insumos').insert({
-                                "nombre": new_nombre, 
-                                "unidad_medida": new_unidad, 
-                                "stock_actual": 0, 
-                                "costo_unitario": costo_base_calc
-                            }).execute()
-                            st.success(f"Creado: {new_nombre}. Costo calculado: ${costo_base_calc:,.2f} por {new_unidad}")
-                            time.sleep(1.5)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-                    else:
-                        st.error("Error en la conversión de unidades.")
-
-        # ---------------------------------------------------------
-        # TAB 3: ACTUALIZAR PRECIOS (CALCULADORA DE FORMATOS)
-        # ---------------------------------------------------------
-        with tab_precios:
-            st.subheader("💲 Actualizador Inteligente de Precios")
-            st.markdown("Usa esta herramienta para pasar los precios de tu cuaderno al sistema sin usar calculadora.")
-            
-            if insumos_existentes:
-                col_sel, col_calc = st.columns([1, 2])
-                
-                with col_sel:
-                    insumo_upd = st.selectbox("Selecciona Producto", insumos_existentes, index=None)
-                    if insumo_upd:
-                        d = mapa_insumos[insumo_upd]
-                        st.info(f"Unidad Sistema: **{d['unidad_medida']}**")
-                        st.write(f"Precio actual: **${d['costo_unitario']:,.2f}** por {d['unidad_medida']}")
-                
-                with col_calc:
-                    if insumo_upd:
-                        st.markdown(f"##### 🧮 Ingresa datos del envase de {insumo_upd}")
-                        c_p1, c_p2, c_p3 = st.columns(3)
-                        
-                        cant_envase = c_p1.number_input("Contenido del Envase", min_value=0.1, help="Ej: 397 para lechera, 1 para kilo de harina")
-                        
-                        # Opciones compatibles
-                        u_base = mapa_insumos[insumo_upd]['unidad_medida']
-                        opts_p = [u_base]
-                        if u_base == 'kg': opts_p = ['kg', 'gr']
-                        elif u_base == 'gr': opts_p = ['gr', 'kg']
-                        elif u_base == 'lt': opts_p = ['lt', 'ml', 'cc']
-                        elif u_base == 'ml': opts_p = ['ml', 'lt']
-                        
-                        uni_envase = c_p2.selectbox("Unidad Envase", opts_p)
-                        precio_envase = c_p3.number_input("Precio del Envase ($)", min_value=0)
-                        
-                        # Preview Cálculo
-                        cant_norm_p = normalizar_cantidad(cant_envase, uni_envase, u_base)
-                        if cant_norm_p and cant_norm_p > 0 and precio_envase > 0:
-                            nuevo_costo_base = precio_envase / cant_norm_p
-                            st.success(f"💡 El sistema guardará que el **{u_base}** vale **${nuevo_costo_base:,.2f}**")
-                            
-                            if st.button("💾 Actualizar Precio Base", type="primary"):
-                                supabase.table('insumos').update({"costo_unitario": nuevo_costo_base}).eq('id', mapa_insumos[insumo_upd]['id']).execute()
-                                st.toast("Precio actualizado correctamente")
-                                time.sleep(1)
-                                st.rerun()
-
-                st.divider()
-                st.subheader("📋 Lista de Precios Actuales (Referencia)")
-                
-                # Tabla de solo lectura para ver resultados
-                df_view = pd.DataFrame(list(mapa_insumos.values()))
-                if not df_view.empty:
-                    st.dataframe(
-                        df_view[['nombre', 'unidad_medida', 'costo_unitario']], 
-                        use_container_width=True,
-                        column_config={
-                            "costo_unitario": st.column_config.NumberColumn("Precio Base ($)", format="$%.2f")
-                        }
-                    )
-
-        # ---------------------------------------------------------
-        # TAB 1: REGISTRAR COMPRA (STOCK)
+        # TAB 1: REGISTRAR COMPRA
         # ---------------------------------------------------------
         with tab_compra:
-            st.subheader("Ingreso de Stock Real")
-            
+            st.subheader("Ingreso de Stock Real (Compras)")
             if not insumos_existentes:
                 st.warning("Crea insumos primero.")
             else:
@@ -1066,12 +957,10 @@ def main_app():
                 if insumo_selec:
                     datos = mapa_insumos[insumo_selec]
                     u_base = datos['unidad_medida']
-                    
                     with c_info:
                         st.info(f"Precio Ref: **${datos['costo_unitario']:,.0f} / {u_base}**")
 
                     c1, c2, c3 = st.columns(3)
-                    cant_input = c1.number_input("Cantidad", min_value=0.1, format="%.2f")
                     
                     opts = [u_base]
                     if u_base == 'kg': opts = ['kg', 'gr']
@@ -1079,41 +968,176 @@ def main_app():
                     elif u_base == 'lt': opts = ['lt', 'ml', 'cc']
                     elif u_base == 'ml': opts = ['ml', 'lt']
                     
-                    u_compra = c2.selectbox("Unidad", opts)
-                    total_pago = c3.number_input("Total Pagado ($)", min_value=0)
+                    with c2:
+                        u_compra = st.selectbox("Unidad Compra", opts, key="c_u")
+                    with c1:
+                        cant_input = st.number_input("Cantidad", min_value=0.0001, format="%.4f", step=0.001, key="c_c")
+                    with c3:
+                        total_pago = st.number_input("Total Pagado ($)", min_value=0.0, step=100.0, key="c_p")
 
                     if st.button("✅ Ingresar Stock"):
                         cant_norm = normalizar_cantidad(cant_input, u_compra, u_base)
                         if cant_norm:
-                            # Calculamos nuevo precio ponderado o actualizamos al nuevo precio de mercado?
-                            # Estrategia: Actualizamos el precio de referencia al de la última compra
                             nuevo_precio_ref = total_pago / cant_norm if cant_norm > 0 else datos['costo_unitario']
-                            
                             supabase.table('insumos').update({
                                 "stock_actual": datos['stock_actual'] + cant_norm,
                                 "costo_unitario": nuevo_precio_ref
                             }).eq('id', datos['id']).execute()
                             
                             registrar_gasto(total_pago, f"Compra: {insumo_selec}")
-                            st.toast("Stock ingresado y precio actualizado.")
+                            st.toast("Stock ingresado.")
                             time.sleep(1)
                             st.rerun()
 
         # ---------------------------------------------------------
-        # TAB 4: VER STOCK (SOLO LECTURA Y BORRADO)
+        # TAB 2: CREAR NUEVO INSUMO
+        # ---------------------------------------------------------
+        with tab_nuevo:
+            st.subheader("Definir Nuevo Insumo")
+            c_nom, c_uni = st.columns([2, 1])
+            new_nombre = c_nom.text_input("Nombre Genérico", placeholder="Ej: Leche Condensada")
+            new_unidad = c_uni.selectbox("Unidad Base del Sistema", ["kg", "gr", "lt", "ml", "unidades"], help="¿Cómo quieres medir esto en tus recetas?")
+
+            st.markdown("##### 🏷️ Precio de Referencia Inicial")
+            c_form1, c_form2, c_form3 = st.columns(3)
+            
+            opts = [new_unidad]
+            if new_unidad == 'kg': opts = ['kg', 'gr']
+            elif new_unidad == 'gr': opts = ['gr', 'kg']
+            elif new_unidad == 'lt': opts = ['lt', 'ml', 'cc']
+            elif new_unidad == 'ml': opts = ['ml', 'lt']
+            
+            with c_form2: uni_ref = st.selectbox("Unidad del envase", opts, key="n_u")
+            with c_form1: cant_ref = st.number_input("Contenido", min_value=0.0001, format="%.4f", step=0.001, key="n_c")
+            with c_form3: precio_ref = st.number_input("Precio ($)", min_value=0.0, step=100.0, key="n_p")
+            
+            if st.button("💾 Crear Ficha"):
+                if new_nombre:
+                    cant_norm = normalizar_cantidad(cant_ref, uni_ref, new_unidad)
+                    if cant_norm and cant_norm > 0:
+                        costo_base_calc = precio_ref / cant_norm
+                        try:
+                            supabase.table('insumos').insert({
+                                "nombre": new_nombre, 
+                                "unidad_medida": new_unidad, 
+                                "stock_actual": 0, 
+                                "costo_unitario": costo_base_calc
+                            }).execute()
+                            st.success(f"Creado: {new_nombre}")
+                            time.sleep(1.5)
+                            st.rerun()
+                        except Exception as e: st.error(f"Error: {e}")
+
+        # ---------------------------------------------------------
+        # TAB 3: ACTUALIZAR PRECIOS
+        # ---------------------------------------------------------
+        with tab_precios:
+            st.subheader("💲 Actualizador de Precios")
+            if insumos_existentes:
+                col_sel, col_calc = st.columns([1, 2])
+                with col_sel:
+                    insumo_upd = st.selectbox("Selecciona Producto", insumos_existentes, index=None)
+                    if insumo_upd:
+                        d = mapa_insumos[insumo_upd]
+                        st.info(f"Unidad: **{d['unidad_medida']}**\nCosto: **${d['costo_unitario']:,.2f}**")
+                
+                with col_calc:
+                    if insumo_upd:
+                        st.markdown(f"##### 🧮 Datos del Envase ({insumo_upd})")
+                        c_p1, c_p2, c_p3 = st.columns([1.5, 1, 1.5])
+                        
+                        u_base = mapa_insumos[insumo_upd]['unidad_medida']
+                        opts_p = [u_base]
+                        if u_base == 'kg': opts_p = ['kg', 'gr']
+                        elif u_base == 'gr': opts_p = ['gr', 'kg']
+                        elif u_base == 'lt': opts_p = ['lt', 'ml', 'cc']
+                        elif u_base == 'ml': opts_p = ['ml', 'lt']
+                        
+                        with c_p2: uni_envase = st.selectbox("Unidad", opts_p, key="p_u")
+                        with c_p1: cant_envase = st.number_input("Contenido", min_value=0.0001, format="%.4f", step=0.001, key="p_c")
+                        with c_p3: precio_envase = st.number_input("Precio Total ($)", min_value=0.0, step=100.0, key="p_p")
+                        
+                        cant_norm_p = normalizar_cantidad(cant_envase, uni_envase, u_base)
+                        if cant_norm_p and cant_norm_p > 0 and precio_envase > 0:
+                            nuevo_costo_base = precio_envase / cant_norm_p
+                            if u_base == 'gr' and cant_envase < 1 and uni_envase == 'gr':
+                                st.warning("⚠️ Cuidado: Pusiste menos de 1 gramo.")
+                            st.success(f"💡 El **{u_base}** vale **${nuevo_costo_base:,.2f}**")
+                            if st.button("💾 Actualizar Precio Base", type="primary"):
+                                supabase.table('insumos').update({"costo_unitario": nuevo_costo_base}).eq('id', mapa_insumos[insumo_upd]['id']).execute()
+                                st.rerun()
+
+                st.divider()
+                df_view = pd.DataFrame(list(mapa_insumos.values()))
+                if not df_view.empty:
+                    st.dataframe(df_view[['nombre', 'unidad_medida', 'costo_unitario']], use_container_width=True)
+
+        # ---------------------------------------------------------
+        # TAB 4: VER Y AJUSTAR STOCK (NUEVO)
         # ---------------------------------------------------------
         with tab_stock:
             st.subheader("Control de Bodega")
+            
+            # --- SECCIÓN DE AJUSTE RÁPIDO ---
+            with st.expander("➕ Agregar / Ajustar Stock Manualmente", expanded=True):
+                st.caption("Usa esto para agregar sobras (ej: 'me quedan 200gr') o corregir el inventario sin registrar gasto.")
+                
+                c_aj_1, c_aj_2, c_aj_3, c_aj_4 = st.columns([2, 1.5, 1, 1.5])
+                
+                with c_aj_1:
+                    item_ajuste = st.selectbox("Producto", insumos_existentes, index=None, key="aj_item")
+                
+                if item_ajuste:
+                    dat_aj = mapa_insumos[item_ajuste]
+                    u_base = dat_aj['unidad_medida']
+                    
+                    with c_aj_2:
+                        tipo_ajuste = st.radio("Acción", ["➕ Sumar al stock", "📝 Fijar stock total"], horizontal=True, label_visibility="collapsed")
+                    
+                    with c_aj_3:
+                        cant_ajuste = st.number_input("Cantidad", min_value=0.0001, format="%.4f", key="aj_cant")
+                    
+                    with c_aj_4:
+                        # Unidades flexibles
+                        opts_aj = [u_base]
+                        if u_base == 'kg': opts_aj = ['kg', 'gr']
+                        elif u_base == 'gr': opts_aj = ['gr', 'kg']
+                        elif u_base == 'lt': opts_aj = ['lt', 'ml', 'cc']
+                        elif u_base == 'ml': opts_aj = ['ml', 'lt']
+                        
+                        uni_ajuste = st.selectbox("Unidad", opts_aj, key="aj_uni")
+                    
+                    # Botón de acción
+                    cant_norm_aj = normalizar_cantidad(cant_ajuste, uni_ajuste, u_base)
+                    
+                    if cant_norm_aj is not None:
+                        nuevo_stock = 0
+                        msg_accion = ""
+                        
+                        if tipo_ajuste == "➕ Sumar al stock":
+                            nuevo_stock = dat_aj['stock_actual'] + cant_norm_aj
+                            msg_accion = f"Sumados {cant_ajuste} {uni_ajuste}"
+                        else:
+                            nuevo_stock = cant_norm_aj
+                            msg_accion = f"Stock fijado en {cant_ajuste} {uni_ajuste}"
+                            
+                        if st.button(f"💾 Guardar: Stock quedará en {nuevo_stock:.3f} {u_base}", use_container_width=True):
+                            supabase.table('insumos').update({"stock_actual": nuevo_stock}).eq('id', dat_aj['id']).execute()
+                            st.success(f"✅ {msg_accion}. Nuevo total: {nuevo_stock:.3f} {u_base}")
+                            time.sleep(1.5)
+                            st.rerun()
+
+            st.divider()
+            
+            # --- TABLA DE STOCK ---
             if insumos_existentes:
                 df = pd.DataFrame(list(mapa_insumos.values()))
                 st.dataframe(df[['nombre', 'stock_actual', 'unidad_medida', 'costo_unitario']], use_container_width=True)
                 
-                st.divider()
-                col_del, _ = st.columns(2)
-                with col_del:
-                    to_del = st.selectbox("Eliminar Insumo", insumos_existentes, index=None, placeholder="Selecciona para borrar...")
+                with st.popover("🗑️ Borrar Insumo"):
+                    to_del = st.selectbox("Eliminar permanentemente:", insumos_existentes, index=None)
                     if to_del:
-                        if st.button(f"🗑️ Borrar {to_del} permanentemente"):
+                        if st.button(f"Confirmar Borrado de {to_del}"):
                             supabase.table('insumos').delete().eq('nombre', to_del).execute()
                             st.rerun()
                             
